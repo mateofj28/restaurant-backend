@@ -1,0 +1,199 @@
+# Restaurant Backend API 🍔
+
+Una API RESTful robusta y moderna para la gestión de un restaurante, construida con Node.js, Express y MongoDB. Este proyecto demuestra las mejores prácticas en el desarrollo de backend, incluyendo la gestión de conexiones a bases de datos, la creación de endpoints complejos y la implementación de un suite de pruebas automatizadas.
+
+## 🚀 Características
+
+-   **Gestión de Usuarios**: Endpoints completos para crear, leer, actualizar y eliminar (CRUD) usuarios.
+-   **Gestión de Órdenes**: Un sistema completo para gestionar las órdenes del restaurante.
+    -   Soporte para diferentes tipos de pedido: `mesa`, `domicilio`, `recoger`.
+    -   Estructura de productos detallada, permitiendo cantidades y estados individuales por unidad (ej. 2 hamburguesas, una en preparación y otra lista).
+    -   Propiedades como número de mesa, cantidad de personas, ID de cliente (para domicilios), total, etc.
+-   **Base de Datos en la Nube**: Integración con MongoDB Atlas para un almacenamiento de datos escalable y seguro.
+-   **Testing Automatizado**: Suite de pruebas completo usando Jest y Supertest para asegurar la fiabilidad de la API.
+-   **Código Moderno**: Escrito con la sintaxis de Módulos de ES (`import`/`export`) y siguiendo las mejores prácticas de estructura de proyectos.
+-   **Variables de Entorno**: Configuración segura de credenciales y datos sensibles usando `dotenv`.
+
+## 🛠️ Stack Tecnológico
+
+-   **Lenguaje**: JavaScript (ESM)
+-   **Backend**: Node.js
+-   **Framework**: Express.js
+-   **Base de Datos**: MongoDB (con el driver nativo)
+-   **Testing**: Jest, Supertest
+-   **Transpilación**: Babel
+-   **Configuración**: dotenv
+
+## 📋 Prerrequisitos
+
+-   [Node.js](https://nodejs.org/) instalado (versión 18 o superior).
+-   [npm](https://www.npmjs.com/) (normalmente viene con Node.js).
+-   Una cuenta en [MongoDB Atlas](https://www.mongodb.com/cloud/atlas) y un cluster configurado.
+
+## ⚙️ Instalación y Configuración
+
+Sigue estos pasos para poner en marcha el proyecto en tu máquina local.
+
+1.  **Clona el repositorio**
+    ```bash
+    git clone https://github.com/tu-usuario/restaurant-backend.git
+    cd restaurant-backend
+    ```
+
+2.  **Instala las dependencias**
+    ```bash
+    npm install
+    ```
+
+3.  **Configura las variables de entorno**
+    -   Crea un archivo llamado `.env` en la raíz del proyecto.
+    -   Añade tus credenciales de MongoDB Atlas. **Importante**: Asegúrate de especificar el nombre de tu base de datos al final de la URI.
+
+    ```env
+    # .env
+
+    # Reemplaza los valores con los de tu cluster de MongoDB Atlas
+    MONGODB_URI=mongodb+srv://<usuario>:<password>@<cluster-url>/<nombre_de_tu_db>?retryWrites=true&w=majority&appName=Cluster0
+    
+    # Puerto en el que correrá el servidor
+    PORT=3000
+    ```
+    **Nota**: El `<nombre_de_tu_db>` es crucial. Si no lo especificas, se usará una base de datos llamada `test`.
+
+4.  **Prepara la base de datos**
+    -   Ve a tu cluster en MongoDB Atlas.
+    -   Navega a "Browse Collections" y crea la base de datos que especificaste en el paso anterior (ej. `restaurant_db`).
+    -   Dentro de esa base de datos, puedes crear las colecciones `usuarios` y `ordenes` o dejar que la aplicación las cree automáticamente al usarlas.
+
+## 🏃‍♂️ Cómo Ejecutar la Aplicación
+
+### Iniciar el Servidor
+
+Para iniciar el servidor en modo de desarrollo:
+
+```bash
+node index.js
+```
+
+Deberías ver en la consola:
+```
+✅ Conectado exitosamente a MongoDB Atlas!
+Servidor escuchando en http://localhost:3000
+```
+
+### Ejecutar las Pruebas
+
+Para ejecutar el suite de pruebas automatizadas:
+
+```bash
+npm test
+```
+
+Esto ejecutará todas las pruebas para los endpoints de usuarios y órdenes, asegurando que todo funciona como se espera.
+
+## 📡 Uso de la API (Endpoints)
+
+A continuación se detallan todos los endpoints disponibles y cómo probarlos usando `curl`.
+
+### Usuarios
+
+| Método | Endpoint | Descripción |
+|---|---|---|
+| `POST` | `/api/usuarios` | Crea un nuevo usuario. |
+| `GET` | `/api/usuarios` | Obtiene la lista de todos los usuarios. |
+| `GET` | `/api/usuarios/:id` | Obtiene un usuario específico por su ID. |
+| `PUT` | `/api/usuarios/:id` | Actualiza un usuario existente. |
+| `DELETE` | `/api/usuarios/:id` | Elimina un usuario existente. |
+
+**Ejemplo: Crear un nuevo usuario**
+```bash
+curl -X POST http://localhost:3000/api/usuarios \
+-H "Content-Type: application/json" \
+-d '{"nombre": "Carlos", "edad": 30, "ciudad": "Bogotá"}'
+```
+
+### Órdenes
+
+| Método | Endpoint | Descripción |
+|---|---|---|
+| `POST` | `/api/ordenes` | Crea una nueva orden. |
+| `GET` | `/api/ordenes` | Obtiene la lista de todas las órdenes. |
+| `GET` | `/api/ordenes/:id` | Obtiene una orden específica por su ID. |
+| `PUT` | `/api/ordenes/:id` | Actualiza una orden existente. |
+
+**Ejemplo 1: Crear una orden para mesa**
+```bash
+curl -X POST http://localhost:3000/api/ordenes \
+-H "Content-Type: application/json" \
+-d '{
+  "mesa": 8,
+  "cantidadPersonas": 3,
+  "tipoPedido": "mesa",
+  "productosSolicitados": [
+    {
+      "nombreProducto": "Hamburguesa Especial",
+      "cantidadSolicitada": 2,
+      "mensaje": "Una sin tomate.",
+      "estadosPorCantidad": [
+        { "estado": "recibida" },
+        { "estado": "recibida" }
+      ]
+    }
+  ],
+  "cantidadIps": 2,
+  "total": 55000
+}'
+```
+
+**Ejemplo 2: Actualizar el estado de una orden**
+(Usa el `orderId` devuelto al crear la orden)
+```bash
+curl -X PUT http://localhost:3000/api/ordenes/<ID_DE_LA_ORDEN> \
+-H "Content-Type: application/json" \
+-d '{
+  "mesa": 8,
+  "cantidadPersonas": 3,
+  "tipoPedido": "mesa",
+  "productosSolicitados": [
+    {
+      "nombreProducto": "Hamburguesa Especial",
+      "cantidadSolicitada": 2,
+      "mensaje": "Una sin tomate.",
+      "estadosPorCantidad": [
+        { "estado": "cocinando" },
+        { "estado": "listo_para_servir" }
+      ]
+    }
+  ],
+  "cantidadIps": 2,
+  "total": 55000
+}'
+```
+
+## 📁 Estructura del Proyecto
+
+```
+restaurant-backend/
+├── .env
+├── .gitignore
+├── babel.config.cjs
+├── jest.config.js
+├── jest.setup.js
+├── package.json
+├── index.js
+└── src/
+    ├── app.js
+    ├── config/
+    │   └── db.js
+    └── routes/
+        ├── usuario.routes.js
+        └── ordenes.routes.js
+```
+
+## 🧠 Nuestro Viaje de Aprendizaje
+
+Este proyecto no es solo código, es el resultado de un proceso de aprendizaje y depuración. Desde la configuración inicial del proyecto y la conexión a la base de datos, hasta la implementación de un sistema de testing robusto y la resolución de errores sutiles (como las condiciones de carrera en las pruebas y los bugs en los endpoints `PUT`), cada paso fue una oportunidad para mejorar y entender mejor cómo construir aplicaciones del mundo real.
+
+---
+
+**¡Disfruta explorando la API!** Si tienes alguna sugerencia o encuentras un error, no dudes en abrir un issue o enviar un pull request.
