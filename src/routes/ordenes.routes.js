@@ -79,21 +79,11 @@ router.get('/:id', async (req, res) => {
 });
 
 // UPDATE: Actualizar una orden por su ID
-// En src/routes/ordenes.routes.js
-
-// UPDATE: Actualizar una orden por su ID
 router.put('/:id', async (req, res) => {
     try {
         const collection = req.db.collection('ordenes');
         const { id } = req.params;
         const ordenActualizada = req.body;
-
-        // --- INICIO DE BLOQUE DE DEPURACIÓN ---
-        console.log('--- DEPURACIÓN DE RUTA PUT ---');
-        console.log('ID recibido en la URL (req.params.id):', id);
-        console.log('¿Es un ObjectId válido?', ObjectId.isValid(id));
-        console.log('Cuerpo (req.body) recibido:', JSON.stringify(ordenActualizada, null, 2));
-        // --- FIN DE BLOQUE DE DEPURACIÓN ---
 
         if (!ObjectId.isValid(id)) {
             return res.status(400).json({ error: 'ID de orden no válido' });
@@ -104,11 +94,6 @@ router.put('/:id', async (req, res) => {
             { $set: ordenActualizada },
             { returnDocument: 'after' }
         );
-
-        // --- INICIO DE BLOQUE DE DEPURACIÓN ---
-        console.log('Resultado de findOneAndUpdate:', result);
-        console.log('--- FIN DE DEPURACIÓN ---');
-        // --- FIN DE BLOQUE DE DEPURACIÓN ---
 
         if (result) {
             res.status(200).json(result.value);
