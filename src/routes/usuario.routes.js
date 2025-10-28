@@ -7,7 +7,7 @@ const router = Router();
 // 1. CREAR un nuevo usuario (POST /)
 router.post('/', async (req, res) => {
     try {
-        const collection = req.db.collection('usuarios');
+        const collection = req.db.collection('users');
         const newUser = req.body;
         const result = await collection.insertOne(newUser);
         res.status(201).json({ message: 'Usuario creado', id: result.insertedId });
@@ -19,7 +19,7 @@ router.post('/', async (req, res) => {
 // 2. LEER todos los usuarios (GET /)
 router.get('/', async (req, res) => {
     try {
-        const collection = req.db.collection('usuarios');
+        const collection = req.db.collection('users');
         const users = await collection.find({}).toArray();
         res.status(200).json(users);
     } catch (error) {
@@ -30,7 +30,7 @@ router.get('/', async (req, res) => {
 // 3. LEER un usuario por su ID (GET /:id)
 router.get('/:id', async (req, res) => {
     try {
-        const collection = req.db.collection('usuarios');
+        const collection = req.db.collection('users');
         const { id } = req.params;
         // Convertir el string de ID a un ObjectId de MongoDB
         const user = await collection.findOne({ _id: new ObjectId(id) });
@@ -47,7 +47,7 @@ router.get('/:id', async (req, res) => {
 // 4. ACTUALIZAR un usuario por su ID (PUT /:id)
 router.put('/:id', async (req, res) => {
     try {
-        const collection = req.db.collection('usuarios');
+        const collection = req.db.collection('users');
         const { id } = req.params;
         const updatedUser = req.body;
         const result = await collection.updateOne(
@@ -67,7 +67,7 @@ router.put('/:id', async (req, res) => {
 // 5. BORRAR un usuario por su ID (DELETE /:id)
 router.delete('/:id', async (req, res) => {
     try {
-        const collection = req.db.collection('usuarios');
+        const collection = req.db.collection('users');
         const { id } = req.params;
         const result = await collection.deleteOne({ _id: new ObjectId(id) });
         if (result.deletedCount > 0) {

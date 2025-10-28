@@ -6,34 +6,34 @@ let app;
 let db; // Variable para la conexión de limpieza
 
 // Datos de prueba que usaremos en los tests
-const ordenMesaDePrueba = {
-    mesa: 10,
-    cantidadPersonas: 2,
-    tipoPedido: 'mesa',
-    productosSolicitados: [
+const testTableOrder = {
+    table: 10,
+    peopleCount: 2,
+    orderType: 'table',
+    requestedProducts: [
         {
-            nombreProducto: 'Orden de Prueba - Producto Mesa',
-            cantidadSolicitada: 1,
-            mensaje: 'Test message',
-            estadosPorCantidad: [{ estado: 'recibida' }]
+            productName: 'Test Order - Table Product',
+            requestedQuantity: 1,
+            message: 'Test message',
+            statusByQuantity: [{ status: 'received' }]
         }
     ],
-    cantidadIps: 1,
+    itemCount: 1,
     total: 20000
 };
 
-const ordenDomicilioDePrueba = {
-    tipoPedido: 'domicilio',
-    idCliente: 'cliente-test-987',
-    productosSolicitados: [
+const testDeliveryOrder = {
+    orderType: 'delivery',
+    customerId: 'cliente-test-987',
+    requestedProducts: [
         {
-            nombreProducto: 'Orden de Prueba - Producto Domicilio',
-            cantidadSolicitada: 1,
-            mensaje: '',
-            estadosPorCantidad: [{ estado: 'recibida' }]
+            productName: 'Test Order - Delivery Product',
+            requestedQuantity: 1,
+            message: '',
+            statusByQuantity: [{ status: 'received' }]
         }
     ],
-    cantidadIps: 0,
+    itemCount: 0,
     total: 30000
 };
 
@@ -46,10 +46,15 @@ beforeAll(async () => {
 
 afterAll(async () => {
     // Solo limpiamos los datos, no cerramos la conexión
-    if (db) {
-        await db.collection('ordenes').deleteMany({
-            "productosSolicitados.nombreProducto": { $regex: /Orden de Prueba/ }
-        });
+    try {
+        if (db) {
+            await db.collection('orders').deleteMany({
+                "requestedProducts.productName": { $regex: /Test Order/ }
+            });
+        }
+    } catch (error) {
+        // Ignoramos errores de limpieza si la conexión ya está cerrada
+        console.log('Cleanup skipped - connection already closed');
     }
 });
 
@@ -57,10 +62,10 @@ afterAll(async () => {
 describe('API Endpoints de Órdenes', () => {
 
     // Test para CREAR una orden de tipo MESA (POST)
-    test('POST /api/ordenes - debería crear una nueva orden para mesa', async () => {
+    test('POST /api/orders - debería crear una nueva orden para mesa', async () => {
         const response = await request(app)
-            .post('/api/ordenes')
-            .send(ordenMesaDePrueba);
+            .post('/api/orders')
+            .send(testTableOrder);
 
         expect(response.status).toBe(201);
         expect(response.body).toHaveProperty('message', 'Orden creada exitosamente');
@@ -69,80 +74,80 @@ describe('API Endpoints de Órdenes', () => {
     });
 
     // Test para CREAR una orden de tipo DOMICILIO (POST)
-    test('POST /api/ordenes - debería crear una nueva orden a domicilio', async () => {
+    test('POST /api/orders - debería crear una nueva orden a domicilio', async () => {
         const response = await request(app)
-            .post('/api/ordenes')
-            .send(ordenDomicilioDePrueba);
+            .post('/api/orders')
+            .send(testDeliveryOrder);
 
         expect(response.status).toBe(201);
         expect(response.body).toHaveProperty('orderId');
     });
 
     // Test para VALIDAR una orden inválida (POST)
-    test('POST /api/ordenes - debería fallar al crear una orden a domicilio sin idCliente', async () => {
-        const ordenInvalida = { ...ordenDomicilioDePrueba };
-        delete ordenInvalida.idCliente; // Hacemos la orden inválida
+    test('POST /api/orders - debería fallar al crear una orden a domicilio sin customerId', async () => {
+        const invalidOrder = { ...testDeliveryOrder };
+        delete invalidOrder.customerId; // Hacemos la orden inválida
 
         const response = await request(app)
-            .post('/api/ordenes')
-            .send(ordenInvalida);
+            .post('/api/orders')
+            .send(invalidOrder);
 
         expect(response.status).toBe(400);
         expect(response.body).toHaveProperty('error', 'Para pedidos a domicilio, el idCliente es obligatorio.');
     });
 
     // Test para LEER todas las órdenes (GET)
-    test('GET /api/ordenes - debería obtener la lista de órdenes', async () => {
+    test('GET /api/orders - debería obtener la lista de órdenes', async () => {
         // Primero, nos aseguramos de que hay al menos una orden
-        await request(app).post('/api/ordenes').send(ordenMesaDePrueba);
+        await request(app).post('/api/orders').send(testTableOrder);
 
-        const response = await request(app).get('/api/ordenes');
+        const response = await request(app).get('/api/orders');
         expect(response.status).toBe(200);
         expect(Array.isArray(response.body)).toBe(true);
         // Verificamos que al menos una orden contiene nuestro producto de prueba
-        const contieneOrdenDePrueba = response.body.some(orden =>
-            orden.productosSolicitados.some(p => p.nombreProducto.includes('Orden de Prueba'))
+        const containsTestOrder = response.body.some(order =>
+            order.requestedProducts.some(p => p.productName.includes('Test Order'))
         );
-        expect(contieneOrdenDePrueba).toBe(true);
+        expect(containsTestOrder).toBe(true);
     });
 
 
 
-    test('PUT /api/ordenes/:id - debería actualizar una orden existente', async () => {
+    test('PUT /api/orders/:id - debería actualizar una orden existente', async () => {
         // 1. Creamos una orden para obtener su ID
         const postResponse = await request(app)
-            .post('/api/ordenes')
-            .send(ordenMesaDePrueba);
+            .post('/api/orders')
+            .send(testTableOrder);
 
         const orderId = postResponse.body.orderId;
         console.log(`ID de la orden creada para el test PUT: ${orderId}`); // Log para depuración
 
         // 2. VERIFICACIÓN: Nos aseguramos de que la orden existe ANTES de actualizarla
-        const getResponse = await request(app).get(`/api/ordenes/${orderId}`);
+        const getResponse = await request(app).get(`/api/orders/${orderId}`);
         expect(getResponse.status).toBe(200, 'La orden creada no pudo ser encontrada con GET'); // Mensaje de error personalizado
         expect(getResponse.body).toHaveProperty('_id', orderId);
 
         // 3. Preparamos los datos de actualización
-        const datosActualizados = {
-            ...ordenMesaDePrueba,
-            estadoGeneral: 'en_preparacion',
-            productosSolicitados: [
+        const updatedData = {
+            ...testTableOrder,
+            status: 'preparing',
+            requestedProducts: [
                 {
-                    ...ordenMesaDePrueba.productosSolicitados[0],
-                    estadosPorCantidad: [{ estado: 'en_preparacion' }]
+                    ...testTableOrder.requestedProducts[0],
+                    statusByQuantity: [{ status: 'preparing' }]
                 }
             ]
         };
 
         // 4. Enviamos la petición PUT
         const putResponse = await request(app)
-            .put(`/api/ordenes/${orderId}`)
-            .send(datosActualizados);
+            .put(`/api/orders/${orderId}`)
+            .send(updatedData);
 
         // 5. Verificamos que la actualización fue exitosa
         expect(putResponse.status).toBe(200);
-        expect(putResponse.body.estadoGeneral).toBe('en_preparacion');
-        expect(putResponse.body.productosSolicitados[0].estadosPorCantidad[0].estado).toBe('en_preparacion');
+        expect(putResponse.body.status).toBe('preparing');
+        expect(putResponse.body.requestedProducts[0].statusByQuantity[0].status).toBe('preparing');
     });
 
 

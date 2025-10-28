@@ -7,7 +7,7 @@ dotenv.config();
 
 const uri = process.env.MONGODB_URI;
 if (!uri) {
-    throw new Error('La variable de entorno MONGODB_URI no está definida.');
+    throw new Error('MONGODB_URI environment variable is not defined.');
 }
 
 const client = new MongoClient(uri);
@@ -22,7 +22,7 @@ export async function connectToDatabase() {
         // Por ejemplo: return client.db('miBaseDeDatos');
         return client.db(); // Usa la base de datos especificada en la URI o la por defecto
     } catch (error) {
-        console.error("❌ Error al conectar a MongoDB:", error);
+        console.error("❌ Error connecting to MongoDB:", error);
         process.exit(1); // Termina el proceso si no se puede conectar
     }
 }
@@ -32,6 +32,6 @@ export async function closeDatabaseConnection() {
         await client.close();
         console.log("🔌 Conexión a MongoDB cerrada.");
     } catch (error) {
-        console.error("❌ Error al cerrar la conexión:", error);
+        console.error("❌ Error closing connection:", error);
     }
 }

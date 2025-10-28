@@ -1,7 +1,7 @@
 // src/app.js
 import express from 'express';
-import usuarioRoutes from './routes/usuario.routes.js';
-import ordenesRoutes from './routes/ordenes.routes.js';
+import userRoutes from './routes/usuario.routes.js';
+import orderRoutes from './routes/ordenes.routes.js';
 
 // Ahora la función recibe la instancia de 'db' como argumento
 export function createApp(db) {
@@ -13,8 +13,8 @@ export function createApp(db) {
     });
 
     app.use(express.json());
-    app.use('/api/usuarios', usuarioRoutes);
-    app.use('/api/ordenes', ordenesRoutes);
+    app.use('/api/users', userRoutes);
+    app.use('/api/orders', orderRoutes);
 
     app.get('/', (req, res) => {
         res.send('🚀 API de Restaurant funcionando!');
