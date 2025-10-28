@@ -9,10 +9,11 @@ export function createApp(db) {
 
     app.use((req, res, next) => {
         req.db = db; // Usamos la conexión que nos inyectaron
+        res.setHeader('Content-Type', 'application/json; charset=utf-8');
         next();
     });
 
-    app.use(express.json());
+    app.use(express.json({ charset: 'utf-8' }));
     app.use('/api/users', userRoutes);
     app.use('/api/orders', orderRoutes);
 
