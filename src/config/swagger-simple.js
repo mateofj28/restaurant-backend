@@ -1234,6 +1234,545 @@ export const swaggerSpec = {
                     }
                 }
             }
+        },
+
+        "/api/orders/complete": {
+            post: {
+                tags: ["Órdenes"],
+                summary: "Completar múltiples órdenes",
+                security: [{ bearerAuth: [] }],
+                requestBody: {
+                    required: true,
+                    content: {
+                        "application/json": {
+                            schema: {
+                                type: "object",
+                                required: ["orderIds"],
+                                properties: {
+                                    orderIds: {
+                                        type: "array",
+                                        items: { type: "string" },
+                                        example: ["order1", "order2"]
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                responses: {
+                    "200": {
+                        description: "Órdenes completadas exitosamente",
+                        content: {
+                            "application/json": {
+                                schema: {
+                                    type: "object",
+                                    properties: {
+                                        message: { type: "string" },
+                                        completedOrders: { type: "array", items: { "$ref": "#/components/schemas/Order" } }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/orders/stats": {
+            get: {
+                tags: ["Órdenes"],
+                summary: "Obtener estadísticas de órdenes",
+                security: [{ bearerAuth: [] }],
+                parameters: [
+                    {
+                        in: "query",
+                        name: "startDate",
+                        schema: { type: "string", format: "date" },
+                        description: "Fecha de inicio"
+                    },
+                    {
+                        in: "query",
+                        name: "endDate",
+                        schema: { type: "string", format: "date" },
+                        description: "Fecha de fin"
+                    }
+                ],
+                responses: {
+                    "200": {
+                        description: "Estadísticas obtenidas exitosamente",
+                        content: {
+                            "application/json": {
+                                schema: {
+                                    type: "object",
+                                    properties: {
+                                        totalOrders: { type: "integer" },
+                                        completedOrders: { type: "integer" },
+                                        pendingOrders: { type: "integer" },
+                                        totalRevenue: { type: "number" },
+                                        averageOrderValue: { type: "number" },
+                                        ordersByStatus: { type: "object" },
+                                        ordersByTable: { type: "object" }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/tables/stats": {
+            get: {
+                tags: ["Mesas"],
+                summary: "Obtener estadísticas de mesas",
+                security: [{ bearerAuth: [] }],
+                responses: {
+                    "200": {
+                        description: "Estadísticas de mesas obtenidas exitosamente",
+                        content: {
+                            "application/json": {
+                                schema: {
+                                    type: "object",
+                                    properties: {
+                                        totalTables: { type: "integer" },
+                                        availableTables: { type: "integer" },
+                                        occupiedTables: { type: "integer" },
+                                        reservedTables: { type: "integer" },
+                                        outOfServiceTables: { type: "integer" },
+                                        occupancyRate: { type: "number" },
+                                        averageOccupancyTime: { type: "number" }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/companies/stats": {
+            get: {
+                tags: ["Empresas"],
+                summary: "Obtener estadísticas generales de empresas",
+                security: [{ bearerAuth: [] }],
+                responses: {
+                    "200": {
+                        description: "Estadísticas generales obtenidas exitosamente",
+                        content: {
+                            "application/json": {
+                                schema: {
+                                    type: "object",
+                                    properties: {
+                                        totalCompanies: { type: "integer" },
+                                        activeCompanies: { type: "integer" },
+                                        companiesByPlan: { type: "object" },
+                                        totalUsers: { type: "integer" },
+                                        totalTables: { type: "integer" },
+                                        totalProducts: { type: "integer" }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/products": {
+            get: {
+                tags: ["Products"],
+                summary: "Obtener todos los productos con filtros",
+                security: [{ bearerAuth: [] }],
+                parameters: [
+                    {
+                        in: "query",
+                        name: "category",
+                        schema: {
+                            type: "string",
+                            enum: ["entradas", "platos", "postres", "bebidas"]
+                        },
+                        description: "Filtrar por categoría"
+                    },
+                    {
+                        in: "query",
+                        name: "isActive",
+                        schema: {
+                            type: "string",
+                            enum: ["true", "false", "all"],
+                            default: "true"
+                        },
+                        description: "Filtrar por estado activo"
+                    },
+                    {
+                        in: "query",
+                        name: "isAvailable",
+                        schema: {
+                            type: "string",
+                            enum: ["true", "false", "all"],
+                            default: "true"
+                        },
+                        description: "Filtrar por disponibilidad"
+                    },
+                    {
+                        in: "query",
+                        name: "search",
+                        schema: { type: "string" },
+                        description: "Buscar en nombre y descripción"
+                    },
+                    {
+                        in: "query",
+                        name: "page",
+                        schema: { type: "integer", default: 1 },
+                        description: "Número de página"
+                    },
+                    {
+                        in: "query",
+                        name: "limit",
+                        schema: { type: "integer", default: 20 },
+                        description: "Elementos por página"
+                    },
+                    {
+                        in: "query",
+                        name: "sortBy",
+                        schema: { type: "string", default: "name" },
+                        description: "Campo para ordenar"
+                    },
+                    {
+                        in: "query",
+                        name: "sortOrder",
+                        schema: { type: "string", enum: ["asc", "desc"], default: "asc" },
+                        description: "Orden de clasificación"
+                    }
+                ],
+                responses: {
+                    "200": {
+                        description: "Lista de productos obtenida exitosamente",
+                        content: {
+                            "application/json": {
+                                schema: {
+                                    type: "object",
+                                    properties: {
+                                        products: {
+                                            type: "array",
+                                            items: { "$ref": "#/components/schemas/Product" }
+                                        },
+                                        pagination: { "$ref": "#/components/schemas/Pagination" },
+                                        stats: {
+                                            type: "array",
+                                            items: {
+                                                type: "object",
+                                                properties: {
+                                                    _id: { type: "string", description: "Categoría" },
+                                                    count: { type: "integer", description: "Total de productos" },
+                                                    available: { type: "integer", description: "Productos disponibles" },
+                                                    avgPrice: { type: "number", description: "Precio promedio" },
+                                                    avgPrepTime: { type: "number", description: "Tiempo promedio de preparación" }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            post: {
+                tags: ["Products"],
+                summary: "Crear nuevo producto",
+                security: [{ bearerAuth: [] }],
+                requestBody: {
+                    required: true,
+                    content: {
+                        "multipart/form-data": {
+                            schema: {
+                                type: "object",
+                                required: ["name", "price", "preparationTime", "category", "description"],
+                                properties: {
+                                    name: { type: "string", example: "Pizza Margherita" },
+                                    price: { type: "number", example: 15.99 },
+                                    preparationTime: { type: "integer", example: 20 },
+                                    category: {
+                                        type: "string",
+                                        enum: ["entradas", "platos", "postres", "bebidas"],
+                                        example: "platos"
+                                    },
+                                    description: {
+                                        type: "string",
+                                        example: "Pizza clásica con tomate, mozzarella y albahaca fresca"
+                                    },
+                                    observations: {
+                                        type: "string",
+                                        example: "Disponible en masa fina o gruesa"
+                                    },
+                                    image: {
+                                        type: "string",
+                                        format: "binary",
+                                        description: "Imagen del producto (max 5MB)"
+                                    },
+                                    allergens: {
+                                        type: "array",
+                                        items: {
+                                            type: "string",
+                                            enum: ["gluten", "lactosa", "frutos_secos", "mariscos", "huevos", "soja", "pescado"]
+                                        }
+                                    },
+                                    nutritionalInfo: {
+                                        type: "object",
+                                        properties: {
+                                            calories: { type: "number" },
+                                            proteins: { type: "number" },
+                                            carbs: { type: "number" },
+                                            fats: { type: "number" }
+                                        }
+                                    },
+                                    tags: {
+                                        type: "array",
+                                        items: { type: "string" }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                responses: {
+                    "201": {
+                        description: "Producto creado exitosamente",
+                        content: {
+                            "application/json": {
+                                schema: { "$ref": "#/components/schemas/Product" }
+                            }
+                        }
+                    },
+                    "400": { description: "Datos inválidos" }
+                }
+            }
+        },
+        "/api/products/{id}": {
+            get: {
+                tags: ["Products"],
+                summary: "Obtener producto por ID",
+                security: [{ bearerAuth: [] }],
+                parameters: [
+                    {
+                        in: "path",
+                        name: "id",
+                        required: true,
+                        schema: { type: "string" },
+                        description: "ID del producto"
+                    }
+                ],
+                responses: {
+                    "200": {
+                        description: "Producto obtenido exitosamente",
+                        content: {
+                            "application/json": {
+                                schema: { "$ref": "#/components/schemas/Product" }
+                            }
+                        }
+                    },
+                    "404": { description: "Producto no encontrado" }
+                }
+            },
+            put: {
+                tags: ["Products"],
+                summary: "Actualizar producto",
+                security: [{ bearerAuth: [] }],
+                parameters: [
+                    {
+                        in: "path",
+                        name: "id",
+                        required: true,
+                        schema: { type: "string" },
+                        description: "ID del producto"
+                    }
+                ],
+                requestBody: {
+                    required: true,
+                    content: {
+                        "multipart/form-data": {
+                            schema: { "$ref": "#/components/schemas/ProductUpdate" }
+                        }
+                    }
+                },
+                responses: {
+                    "200": {
+                        description: "Producto actualizado exitosamente",
+                        content: {
+                            "application/json": {
+                                schema: { "$ref": "#/components/schemas/Product" }
+                            }
+                        }
+                    },
+                    "404": { description: "Producto no encontrado" }
+                }
+            },
+            delete: {
+                tags: ["Products"],
+                summary: "Desactivar producto (soft delete)",
+                security: [{ bearerAuth: [] }],
+                parameters: [
+                    {
+                        in: "path",
+                        name: "id",
+                        required: true,
+                        schema: { type: "string" },
+                        description: "ID del producto"
+                    }
+                ],
+                responses: {
+                    "200": {
+                        description: "Producto desactivado exitosamente",
+                        content: {
+                            "application/json": {
+                                schema: {
+                                    type: "object",
+                                    properties: {
+                                        message: { type: "string", example: "Producto desactivado correctamente" }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/products/{id}/availability": {
+            patch: {
+                tags: ["Products"],
+                summary: "Cambiar disponibilidad del producto",
+                security: [{ bearerAuth: [] }],
+                parameters: [
+                    {
+                        in: "path",
+                        name: "id",
+                        required: true,
+                        schema: { type: "string" },
+                        description: "ID del producto"
+                    }
+                ],
+                requestBody: {
+                    required: true,
+                    content: {
+                        "application/json": {
+                            schema: {
+                                type: "object",
+                                required: ["isAvailable"],
+                                properties: {
+                                    isAvailable: { type: "boolean", example: false }
+                                }
+                            }
+                        }
+                    }
+                },
+                responses: {
+                    "200": {
+                        description: "Disponibilidad actualizada exitosamente",
+                        content: {
+                            "application/json": {
+                                schema: { "$ref": "#/components/schemas/Product" }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/products/menu/{companyId}": {
+            get: {
+                tags: ["Products - Public"],
+                summary: "Obtener menú público de productos por empresa",
+                parameters: [
+                    {
+                        in: "path",
+                        name: "companyId",
+                        required: true,
+                        schema: { type: "string" },
+                        description: "ID de la empresa"
+                    }
+                ],
+                responses: {
+                    "200": {
+                        description: "Menú obtenido exitosamente",
+                        content: {
+                            "application/json": {
+                                schema: {
+                                    type: "object",
+                                    properties: {
+                                        entradas: {
+                                            type: "array",
+                                            items: { "$ref": "#/components/schemas/ProductPublic" }
+                                        },
+                                        platos: {
+                                            type: "array",
+                                            items: { "$ref": "#/components/schemas/ProductPublic" }
+                                        },
+                                        postres: {
+                                            type: "array",
+                                            items: { "$ref": "#/components/schemas/ProductPublic" }
+                                        },
+                                        bebidas: {
+                                            type: "array",
+                                            items: { "$ref": "#/components/schemas/ProductPublic" }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/products/stats": {
+            get: {
+                tags: ["Products"],
+                summary: "Obtener estadísticas de productos",
+                security: [{ bearerAuth: [] }],
+                responses: {
+                    "200": {
+                        description: "Estadísticas de productos obtenidas exitosamente",
+                        content: {
+                            "application/json": {
+                                schema: {
+                                    type: "object",
+                                    properties: {
+                                        totalProducts: { type: "integer" },
+                                        availableProducts: { type: "integer" },
+                                        productsByCategory: { type: "object" },
+                                        averagePrice: { type: "number" },
+                                        averagePreparationTime: { type: "number" },
+                                        mostPopularProducts: { type: "array", items: { "$ref": "#/components/schemas/Product" } }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/dashboard": {
+            get: {
+                tags: ["Dashboard"],
+                summary: "Obtener datos del dashboard principal",
+                security: [{ bearerAuth: [] }],
+                responses: {
+                    "200": {
+                        description: "Datos del dashboard obtenidos exitosamente",
+                        content: {
+                            "application/json": {
+                                schema: {
+                                    type: "object",
+                                    properties: {
+                                        todayOrders: { type: "integer" },
+                                        todayRevenue: { type: "number" },
+                                        activeTables: { type: "integer" },
+                                        availableProducts: { type: "integer" },
+                                        recentOrders: { type: "array", items: { "$ref": "#/components/schemas/Order" } },
+                                        tableStatus: { type: "object" },
+                                        popularProducts: { type: "array", items: { "$ref": "#/components/schemas/Product" } },
+                                        hourlyStats: { type: "array", items: { type: "object" } }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 };

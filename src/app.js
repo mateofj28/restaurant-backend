@@ -23,7 +23,14 @@ export function createApp(db) {
     // Servir archivos estáticos
     app.use('/uploads', express.static('uploads'));
     app.use('/images', express.static('public/images'));
-    app.use(express.static('.')); // Para servir test-images.html
+    
+    // Ruta específica para test-images.html
+    app.get('/test-images.html', (req, res) => {
+        res.setHeader('Content-Type', 'text/html; charset=utf-8');
+        res.sendFile('test-images.html', { root: './public' });
+    });
+    
+    app.use(express.static('public')); // Servir otros archivos del directorio public
     
     // Swagger UI
     app.get('/api-docs', (req, res) => {
