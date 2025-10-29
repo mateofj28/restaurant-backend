@@ -1,5 +1,5 @@
-import Customer from '../models/Customer.js';
 import { validationResult } from 'express-validator';
+import { ObjectId } from '../config/db.js';
 
 // Obtener todos los clientes con filtros
 const getCustomers = async (req, res) => {
@@ -15,7 +15,8 @@ const getCustomers = async (req, res) => {
             sortOrder = 'asc'
         } = req.query;
 
-        const companyId = req.user.companyId;
+        const collection = req.db.collection('customers');
+        const companyId = new ObjectId(req.user.companyId);
         
         // Construir filtros
         const filters = { companyId };
@@ -40,32 +41,30 @@ const getCustomers = async (req, res) => {
         const sort = {};
         sort[sortBy] = sortOrder === 'desc' ? -1 : 1;
 
-        const customers = await Customer.find(filters)
-            .populate('createdBy', 'name email')
-            .populate('updatedBy', 'name email')
+        const customers = await collection.find(filters)
             .sort(sort)
             .skip(skip)
-            .limit(parseInt(limit));
+            .limit(parseInt(limit))
+            .toArray();
 
-        const total = await Customer.countDocuments(filters);
+        const total = await collection.countDocuments(filters);
 
         // Estadísticas
-        const stats = await Customer.aggregate([
-            { $match: { companyId: req.user.companyId, isActive: true } },
+        const stats = await collection.aggregate([
+            { $match: { companyId: companyId, isActive: true } },
             {
                 $group: {
                     _id: null,
                     totalCustomers: { $sum: 1 },
-                    totalOrders: { $sum: { $size: '$orderHistory' } },
-                    avgOrdersPerCustomer: { $avg: { $size: '$orderHistory' } },
-                    topCities: { $push: '$city' }
+                    totalOrders: { $sum: { $size: { $ifNull: ['$orderHistory', []] } } },
+                    avgOrdersPerCustomer: { $avg: { $size: { $ifNull: ['$orderHistory', []] } } }
                 }
             }
-        ]);
+        ]).toArray();
 
         // Contar clientes por ciudad
-        const citiesStats = await Customer.aggregate([
-            { $match: { companyId: req.user.companyId, isActive: true } },
+        const citiesStats = await collection.aggregate([
+            { $match: { companyId: companyId, isActive: true } },
             {
                 $group: {
                     _id: '$city',
@@ -74,7 +73,7 @@ const getCustomers = async (req, res) => {
             },
             { $sort: { count: -1 } },
             { $limit: 10 }
-        ]);
+        ]).toArray();
 
         res.json({
             customers,
@@ -97,12 +96,17 @@ const getCustomers = async (req, res) => {
 const getCustomerById = async (req, res) => {
     try {
         const { id } = req.params;
-        const companyId = req.user.companyId;
+        const collection = req.db.collection('customers');
+        const companyId = new ObjectId(req.user.companyId);
 
-        const customer = await Customer.findOne({ _id: id, companyId })
-            .populate('createdBy', 'name email')
-            .populate('updatedBy', 'name email')
-            .populate('orderHistory.orderId', 'orderNumber status totalAmount createdAt');
+        if (!ObjectId.isValid(id)) {
+            return res.status(400).json({ error: 'ID de cliente no válido' });
+        }
+
+        const customer = await collection.findOne({ 
+            _id: new ObjectId(id), 
+            companyId 
+        });
 
         if (!customer) {
             return res.status(404).json({ error: 'Cliente no encontrado' });
@@ -123,29 +127,34 @@ const createCustomer = async (req, res) => {
             return res.status(400).json({ errors: errors.array() });
         }
 
+        const collection = req.db.collection('customers');
+        const companyId = new ObjectId(req.user.companyId);
+
+        // Verificar email único por empresa
+        const existingCustomer = await collection.findOne({
+            companyId,
+            email: req.body.email
+        });
+
+        if (existingCustomer) {
+            return res.status(400).json({ error: 'Ya existe un cliente con este correo electrónico en la empresa' });
+        }
+
         const customerData = {
             ...req.body,
-            companyId: req.user.companyId,
-            createdBy: req.user.id
+            companyId,
+            createdBy: new ObjectId(req.user.id),
+            createdAt: new Date(),
+            isActive: true,
+            orderHistory: []
         };
 
-        const customer = new Customer(customerData);
-        await customer.save();
-
-        await customer.populate('createdBy', 'name email');
+        const result = await collection.insertOne(customerData);
+        const customer = await collection.findOne({ _id: result.insertedId });
 
         res.status(201).json(customer);
     } catch (error) {
         console.error('Error al crear cliente:', error);
-        
-        if (error.code === 'DUPLICATE_EMAIL') {
-            return res.status(400).json({ error: error.message });
-        }
-        
-        if (error.code === 11000) {
-            return res.status(400).json({ error: 'Ya existe un cliente con este correo electrónico' });
-        }
-        
         res.status(500).json({ error: 'Error interno del servidor' });
     }
 };
@@ -159,40 +168,57 @@ const updateCustomer = async (req, res) => {
         }
 
         const { id } = req.params;
-        const companyId = req.user.companyId;
+        const collection = req.db.collection('customers');
+        const companyId = new ObjectId(req.user.companyId);
 
-        const customer = await Customer.findOne({ _id: id, companyId });
+        if (!ObjectId.isValid(id)) {
+            return res.status(400).json({ error: 'ID de cliente no válido' });
+        }
+
+        // Verificar que el cliente existe
+        const customer = await collection.findOne({ 
+            _id: new ObjectId(id), 
+            companyId 
+        });
+        
         if (!customer) {
             return res.status(404).json({ error: 'Cliente no encontrado' });
         }
 
+        // Verificar email único si se está cambiando
+        if (req.body.email && req.body.email !== customer.email) {
+            const existingCustomer = await collection.findOne({
+                companyId,
+                email: req.body.email,
+                _id: { $ne: new ObjectId(id) }
+            });
+
+            if (existingCustomer) {
+                return res.status(400).json({ error: 'Ya existe un cliente con este correo electrónico' });
+            }
+        }
+
         const updateData = {
             ...req.body,
-            updatedBy: req.user.id
+            updatedBy: new ObjectId(req.user.id),
+            updatedAt: new Date()
         };
 
-        // No permitir cambiar companyId
+        // No permitir cambiar campos críticos
         delete updateData.companyId;
         delete updateData.orderHistory;
+        delete updateData.createdAt;
+        delete updateData.createdBy;
 
-        const updatedCustomer = await Customer.findByIdAndUpdate(
-            id,
-            updateData,
-            { new: true, runValidators: true }
-        ).populate('createdBy updatedBy', 'name email');
+        const result = await collection.findOneAndUpdate(
+            { _id: new ObjectId(id), companyId },
+            { $set: updateData },
+            { returnDocument: 'after' }
+        );
 
-        res.json(updatedCustomer);
+        res.json(result);
     } catch (error) {
         console.error('Error al actualizar cliente:', error);
-        
-        if (error.code === 'DUPLICATE_EMAIL') {
-            return res.status(400).json({ error: error.message });
-        }
-        
-        if (error.code === 11000) {
-            return res.status(400).json({ error: 'Ya existe un cliente con este correo electrónico' });
-        }
-        
         res.status(500).json({ error: 'Error interno del servidor' });
     }
 };
@@ -201,18 +227,26 @@ const updateCustomer = async (req, res) => {
 const deleteCustomer = async (req, res) => {
     try {
         const { id } = req.params;
-        const companyId = req.user.companyId;
+        const collection = req.db.collection('customers');
+        const companyId = new ObjectId(req.user.companyId);
 
-        const customer = await Customer.findOneAndUpdate(
-            { _id: id, companyId },
+        if (!ObjectId.isValid(id)) {
+            return res.status(400).json({ error: 'ID de cliente no válido' });
+        }
+
+        const result = await collection.findOneAndUpdate(
+            { _id: new ObjectId(id), companyId },
             { 
-                isActive: false,
-                updatedBy: req.user.id
+                $set: {
+                    isActive: false,
+                    updatedBy: new ObjectId(req.user.id),
+                    updatedAt: new Date()
+                }
             },
-            { new: true }
+            { returnDocument: 'after' }
         );
 
-        if (!customer) {
+        if (!result) {
             return res.status(404).json({ error: 'Cliente no encontrado' });
         }
 
@@ -228,28 +262,36 @@ const addOrderToHistory = async (req, res) => {
     try {
         const { id } = req.params;
         const { orderId, totalAmount } = req.body;
-        const companyId = req.user.companyId;
+        const collection = req.db.collection('customers');
+        const companyId = new ObjectId(req.user.companyId);
 
-        const customer = await Customer.findOneAndUpdate(
-            { _id: id, companyId },
+        if (!ObjectId.isValid(id)) {
+            return res.status(400).json({ error: 'ID de cliente no válido' });
+        }
+
+        const result = await collection.findOneAndUpdate(
+            { _id: new ObjectId(id), companyId },
             {
                 $push: {
                     orderHistory: {
-                        orderId,
+                        orderId: new ObjectId(orderId),
                         totalAmount,
                         orderDate: new Date()
                     }
                 },
-                updatedBy: req.user.id
+                $set: {
+                    updatedBy: new ObjectId(req.user.id),
+                    updatedAt: new Date()
+                }
             },
-            { new: true }
-        ).populate('createdBy updatedBy', 'name email');
+            { returnDocument: 'after' }
+        );
 
-        if (!customer) {
+        if (!result) {
             return res.status(404).json({ error: 'Cliente no encontrado' });
         }
 
-        res.json(customer);
+        res.json(result);
     } catch (error) {
         console.error('Error al agregar orden al historial:', error);
         res.status(500).json({ error: 'Error interno del servidor' });
@@ -260,13 +302,14 @@ const addOrderToHistory = async (req, res) => {
 const searchCustomers = async (req, res) => {
     try {
         const { query } = req.query;
-        const companyId = req.user.companyId;
+        const collection = req.db.collection('customers');
+        const companyId = new ObjectId(req.user.companyId);
 
         if (!query || query.length < 3) {
             return res.status(400).json({ error: 'La búsqueda debe tener al menos 3 caracteres' });
         }
 
-        const customers = await Customer.find({
+        const customers = await collection.find({
             companyId,
             isActive: true,
             $or: [
@@ -274,9 +317,18 @@ const searchCustomers = async (req, res) => {
                 { email: { $regex: query, $options: 'i' } },
                 { phoneNumber: { $regex: query, $options: 'i' } }
             ]
+        }, {
+            projection: {
+                fullName: 1,
+                email: 1,
+                phoneNumber: 1,
+                deliveryAddress: 1,
+                city: 1,
+                state: 1
+            }
         })
-        .select('fullName email phoneNumber deliveryAddress city state')
-        .limit(10);
+        .limit(10)
+        .toArray();
 
         res.json(customers);
     } catch (error) {

@@ -20,41 +20,41 @@ export function createApp(db) {
     });
 
     app.use(express.json({ charset: 'utf-8' }));
-    
+
     // Servir archivos estáticos
     app.use('/uploads', express.static('uploads'));
     app.use('/images', express.static('public/images'));
-    
 
-    
+
+
     app.use(express.static('public')); // Servir otros archivos del directorio public
-    
+
     // Swagger UI
     app.get('/api-docs', (req, res) => {
         res.setHeader('Content-Type', 'text/html');
         res.send(createSwaggerHTML());
     });
-    
+
     // Swagger JSON spec
     app.get('/api/swagger.json', (req, res) => {
         res.json(swaggerSpec);
     });
-    
+
     // Rutas de autenticación
     app.use('/api/auth', authRoutes);
-    
+
     // Rutas de empresas
     app.use('/api/companies', companyRoutes);
-    
+
     // Rutas de mesas
     app.use('/api/tables', tableRoutes);
-    
+
     // Rutas de productos
     app.use('/api/products', productRoutes);
-    
+
     // Rutas de clientes
     app.use('/api/customers', customerRoutes);
-    
+
 
     app.use('/api/orders', orderRoutes);
 

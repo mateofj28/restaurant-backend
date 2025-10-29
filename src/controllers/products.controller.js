@@ -1,9 +1,9 @@
-import Product from '../models/Product.js';
 import { validationResult } from 'express-validator';
 import multer from 'multer';
 import path from 'path';
 import { promises as fs } from 'fs';
 import { fileURLToPath } from 'url';
+import { ObjectId } from '../config/db.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -57,7 +57,8 @@ const getProducts = async (req, res) => {
             sortOrder = 'asc'
         } = req.query;
 
-        const companyId = req.user.companyId;
+        const collection = req.db.collection('products');
+        const companyId = new ObjectId(req.user.companyId);
         
         // Construir filtros
         const filters = { companyId };
@@ -81,18 +82,17 @@ const getProducts = async (req, res) => {
         const sort = {};
         sort[sortBy] = sortOrder === 'desc' ? -1 : 1;
 
-        const products = await Product.find(filters)
-            .populate('createdBy', 'name email')
-            .populate('updatedBy', 'name email')
+        const products = await collection.find(filters)
             .sort(sort)
             .skip(skip)
-            .limit(parseInt(limit));
+            .limit(parseInt(limit))
+            .toArray();
 
-        const total = await Product.countDocuments(filters);
+        const total = await collection.countDocuments(filters);
 
         // Estadísticas por categoría
-        const stats = await Product.aggregate([
-            { $match: { companyId: req.user.companyId, isActive: true } },
+        const stats = await collection.aggregate([
+            { $match: { companyId: companyId, isActive: true } },
             {
                 $group: {
                     _id: '$category',
@@ -102,7 +102,7 @@ const getProducts = async (req, res) => {
                     avgPrepTime: { $avg: '$preparationTime' }
                 }
             }
-        ]);
+        ]).toArray();
 
         res.json({
             products,
@@ -124,11 +124,17 @@ const getProducts = async (req, res) => {
 const getProductById = async (req, res) => {
     try {
         const { id } = req.params;
-        const companyId = req.user.companyId;
+        const collection = req.db.collection('products');
+        const companyId = new ObjectId(req.user.companyId);
 
-        const product = await Product.findOne({ _id: id, companyId })
-            .populate('createdBy', 'name email')
-            .populate('updatedBy', 'name email');
+        if (!ObjectId.isValid(id)) {
+            return res.status(400).json({ error: 'ID de producto no válido' });
+        }
+
+        const product = await collection.findOne({ 
+            _id: new ObjectId(id), 
+            companyId 
+        });
 
         if (!product) {
             return res.status(404).json({ error: 'Producto no encontrado' });
@@ -149,10 +155,14 @@ const createProduct = async (req, res) => {
             return res.status(400).json({ errors: errors.array() });
         }
 
+        const collection = req.db.collection('products');
         const productData = {
             ...req.body,
-            companyId: req.user.companyId,
-            createdBy: req.user.id
+            companyId: new ObjectId(req.user.companyId),
+            createdBy: new ObjectId(req.user.id),
+            createdAt: new Date(),
+            isActive: true,
+            isAvailable: true
         };
 
         // Manejar imagen si se subió
@@ -164,10 +174,19 @@ const createProduct = async (req, res) => {
             };
         }
 
-        const product = new Product(productData);
-        await product.save();
+        // Convertir arrays de strings si vienen como strings
+        if (typeof productData.allergens === 'string') {
+            productData.allergens = JSON.parse(productData.allergens);
+        }
+        if (typeof productData.tags === 'string') {
+            productData.tags = JSON.parse(productData.tags);
+        }
+        if (typeof productData.nutritionalInfo === 'string') {
+            productData.nutritionalInfo = JSON.parse(productData.nutritionalInfo);
+        }
 
-        await product.populate('createdBy', 'name email');
+        const result = await collection.insertOne(productData);
+        const product = await collection.findOne({ _id: result.insertedId });
 
         res.status(201).json(product);
     } catch (error) {
@@ -195,16 +214,26 @@ const updateProduct = async (req, res) => {
         }
 
         const { id } = req.params;
-        const companyId = req.user.companyId;
+        const collection = req.db.collection('products');
+        const companyId = new ObjectId(req.user.companyId);
 
-        const product = await Product.findOne({ _id: id, companyId });
+        if (!ObjectId.isValid(id)) {
+            return res.status(400).json({ error: 'ID de producto no válido' });
+        }
+
+        const product = await collection.findOne({ 
+            _id: new ObjectId(id), 
+            companyId 
+        });
+        
         if (!product) {
             return res.status(404).json({ error: 'Producto no encontrado' });
         }
 
         const updateData = {
             ...req.body,
-            updatedBy: req.user.id
+            updatedBy: new ObjectId(req.user.id),
+            updatedAt: new Date()
         };
 
         // Manejar nueva imagen
@@ -226,13 +255,24 @@ const updateProduct = async (req, res) => {
             };
         }
 
-        const updatedProduct = await Product.findByIdAndUpdate(
-            id,
-            updateData,
-            { new: true, runValidators: true }
-        ).populate('createdBy updatedBy', 'name email');
+        // Convertir arrays de strings si vienen como strings
+        if (typeof updateData.allergens === 'string') {
+            updateData.allergens = JSON.parse(updateData.allergens);
+        }
+        if (typeof updateData.tags === 'string') {
+            updateData.tags = JSON.parse(updateData.tags);
+        }
+        if (typeof updateData.nutritionalInfo === 'string') {
+            updateData.nutritionalInfo = JSON.parse(updateData.nutritionalInfo);
+        }
 
-        res.json(updatedProduct);
+        const result = await collection.findOneAndUpdate(
+            { _id: new ObjectId(id), companyId },
+            { $set: updateData },
+            { returnDocument: 'after' }
+        );
+
+        res.json(result);
     } catch (error) {
         console.error('Error al actualizar producto:', error);
         
@@ -254,22 +294,30 @@ const toggleAvailability = async (req, res) => {
     try {
         const { id } = req.params;
         const { isAvailable } = req.body;
-        const companyId = req.user.companyId;
+        const collection = req.db.collection('products');
+        const companyId = new ObjectId(req.user.companyId);
 
-        const product = await Product.findOneAndUpdate(
-            { _id: id, companyId },
+        if (!ObjectId.isValid(id)) {
+            return res.status(400).json({ error: 'ID de producto no válido' });
+        }
+
+        const result = await collection.findOneAndUpdate(
+            { _id: new ObjectId(id), companyId },
             { 
-                isAvailable: isAvailable,
-                updatedBy: req.user.id
+                $set: {
+                    isAvailable: isAvailable,
+                    updatedBy: new ObjectId(req.user.id),
+                    updatedAt: new Date()
+                }
             },
-            { new: true }
-        ).populate('createdBy updatedBy', 'name email');
+            { returnDocument: 'after' }
+        );
 
-        if (!product) {
+        if (!result) {
             return res.status(404).json({ error: 'Producto no encontrado' });
         }
 
-        res.json(product);
+        res.json(result);
     } catch (error) {
         console.error('Error al cambiar disponibilidad:', error);
         res.status(500).json({ error: 'Error interno del servidor' });
@@ -280,18 +328,26 @@ const toggleAvailability = async (req, res) => {
 const deleteProduct = async (req, res) => {
     try {
         const { id } = req.params;
-        const companyId = req.user.companyId;
+        const collection = req.db.collection('products');
+        const companyId = new ObjectId(req.user.companyId);
 
-        const product = await Product.findOneAndUpdate(
-            { _id: id, companyId },
+        if (!ObjectId.isValid(id)) {
+            return res.status(400).json({ error: 'ID de producto no válido' });
+        }
+
+        const result = await collection.findOneAndUpdate(
+            { _id: new ObjectId(id), companyId },
             { 
-                isActive: false,
-                updatedBy: req.user.id
+                $set: {
+                    isActive: false,
+                    updatedBy: new ObjectId(req.user.id),
+                    updatedAt: new Date()
+                }
             },
-            { new: true }
+            { returnDocument: 'after' }
         );
 
-        if (!product) {
+        if (!result) {
             return res.status(404).json({ error: 'Producto no encontrado' });
         }
 
@@ -306,13 +362,29 @@ const deleteProduct = async (req, res) => {
 const getProductsByCategory = async (req, res) => {
     try {
         const { companyId } = req.params;
+        const collection = req.db.collection('products');
+
+        if (!ObjectId.isValid(companyId)) {
+            return res.status(400).json({ error: 'ID de empresa no válido' });
+        }
         
-        const products = await Product.find({
-            companyId,
+        const products = await collection.find({
+            companyId: new ObjectId(companyId),
             isActive: true,
             isAvailable: true
-        }).select('name price preparationTime image category description observations allergens tags')
-          .sort({ category: 1, name: 1 });
+        }, {
+            projection: {
+                name: 1,
+                price: 1,
+                preparationTime: 1,
+                image: 1,
+                category: 1,
+                description: 1,
+                observations: 1,
+                allergens: 1,
+                tags: 1
+            }
+        }).sort({ category: 1, name: 1 }).toArray();
 
         // Agrupar por categoría
         const menu = products.reduce((acc, product) => {

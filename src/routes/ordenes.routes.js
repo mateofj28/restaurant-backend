@@ -18,39 +18,49 @@ router.post('/', authenticateToken, requireRole(['admin', 'manager', 'mesero']),
             return res.status(400).json({ error: 'El tipo de pedido es inválido o no fue proporcionado.' });
         }
 
-        // 2. Si es domicilio, el idCliente es obligatorio
+        // 2. Si es domicilio, el customerId es obligatorio
         if (newOrder.orderType === 'delivery' && !newOrder.customerId) {
-            return res.status(400).json({ error: 'Para pedidos a domicilio, el idCliente es obligatorio.' });
+            return res.status(400).json({ error: 'Para pedidos a domicilio, el customerId es obligatorio.' });
         }
 
         // 3. Si es mesa, validar disponibilidad de mesa
+        let tableData = null;
         if (newOrder.orderType === 'table') {
-            if (!newOrder.table) {
-                return res.status(400).json({ error: 'Para pedidos en mesa, el número de mesa es obligatorio.' });
+            if (!newOrder.tableId && !newOrder.table) {
+                return res.status(400).json({ error: 'Para pedidos en mesa, el tableId o número de mesa es obligatorio.' });
             }
 
             // Verificar disponibilidad de mesa
             const tablesCollection = req.db.collection('tables');
-            const table = await tablesCollection.findOne({
-                number: parseInt(newOrder.table),
-                companyId: req.user.companyId,
-                isActive: true
-            });
 
-            if (!table) {
-                return res.status(404).json({ error: `Mesa ${newOrder.table} no encontrada.` });
+            // Buscar por tableId o por número de mesa
+            let tableQuery;
+            if (newOrder.tableId) {
+                // Validar que tableId sea un ObjectId válido
+                if (!ObjectId.isValid(newOrder.tableId)) {
+                    return res.status(400).json({ error: 'tableId no es un ObjectId válido.' });
+                }
+                tableQuery = { _id: new ObjectId(newOrder.tableId), companyId: req.user.companyId };
+            } else {
+                tableQuery = { number: parseInt(newOrder.table), companyId: req.user.companyId, isActive: true };
             }
 
-            if (table.status !== TABLE_STATUS.AVAILABLE) {
+            tableData = await tablesCollection.findOne(tableQuery);
+
+            if (!tableData) {
+                return res.status(404).json({ error: `Mesa no encontrada.` });
+            }
+
+            if (tableData.status !== TABLE_STATUS.AVAILABLE) {
                 return res.status(400).json({
-                    error: `Mesa ${newOrder.table} no está disponible. Estado actual: ${table.status}`
+                    error: `Mesa ${tableData.number} no está disponible. Estado actual: ${tableData.status}`
                 });
             }
 
             // Verificar capacidad si se proporciona peopleCount
-            if (newOrder.peopleCount && table.capacity < newOrder.peopleCount) {
+            if (newOrder.peopleCount && tableData.capacity < newOrder.peopleCount) {
                 return res.status(400).json({
-                    error: `Mesa ${newOrder.table} tiene capacidad para ${table.capacity} personas, pero se solicitó para ${newOrder.peopleCount}`
+                    error: `Mesa ${tableData.number} tiene capacidad para ${tableData.capacity} personas, pero se solicitó para ${newOrder.peopleCount}`
                 });
             }
         }
@@ -60,28 +70,102 @@ router.post('/', authenticateToken, requireRole(['admin', 'manager', 'mesero']),
             return res.status(400).json({ error: 'La orden debe contener al menos un producto.' });
         }
 
-        // --- Añadir datos automáticos del servidor ---
-        newOrder.createdAt = new Date();
-        newOrder.status = 'received'; // Estado inicial de la orden
-        newOrder.companyId = req.user.companyId; // Asociar con la empresa del usuario
-        newOrder.createdBy = req.user.id; // Usuario que creó la orden
+        // 5. Validar y enriquecer productos con snapshots
+        const productsCollection = req.db.collection('products');
+        const enrichedProducts = [];
+        let totalAmount = 0;
 
-        const result = await collection.insertOne(newOrder);
+        for (const requestedProduct of newOrder.requestedProducts) {
+            if (!requestedProduct.productId || !requestedProduct.requestedQuantity) {
+                return res.status(400).json({
+                    error: 'Cada producto debe tener productId y requestedQuantity.'
+                });
+            }
+
+            // Obtener datos actuales del producto para el snapshot
+            const product = await productsCollection.findOne({
+                _id: new ObjectId(requestedProduct.productId),
+                companyId: new ObjectId(req.user.companyId),
+                isActive: true
+            });
+
+            if (!product) {
+                return res.status(404).json({
+                    error: `Producto con ID ${requestedProduct.productId} no encontrado.`
+                });
+            }
+
+            // Crear el snapshot del producto
+            const productSnapshot = {
+                name: product.name,
+                price: product.price,
+                category: product.category || '',
+                description: product.description || ''
+            };
+
+            // Crear statusByQuantity inicial (todos pendientes)
+            const statusByQuantity = [];
+            for (let i = 1; i <= requestedProduct.requestedQuantity; i++) {
+                statusByQuantity.push({
+                    index: i,
+                    status: 'pendiente'
+                });
+            }
+
+            // Calcular subtotal
+            const subtotal = product.price * requestedProduct.requestedQuantity;
+            totalAmount += subtotal;
+
+            enrichedProducts.push({
+                productId: requestedProduct.productId,
+                productSnapshot,
+                requestedQuantity: parseInt(requestedProduct.requestedQuantity),
+                message: requestedProduct.message || '',
+                statusByQuantity
+            });
+        }
+
+        // --- Crear la estructura final de la orden ---
+        const orderData = {
+            orderType: newOrder.orderType,
+            requestedProducts: enrichedProducts,
+            itemCount: enrichedProducts.length,
+            total: parseFloat(totalAmount.toFixed(2)),
+            createdAt: new Date(),
+            status: 'received',
+            companyId: req.user.companyId,
+            createdBy: req.user.userId || null
+        };
+
+        // Agregar campos específicos según el tipo de orden
+        if (newOrder.orderType === 'table') {
+            orderData.tableId = tableData._id.toString();
+            orderData.peopleCount = newOrder.peopleCount || 1;
+        }
+
+        if (newOrder.orderType === 'delivery') {
+            orderData.customerId = newOrder.customerId;
+            orderData.deliveryAddress = newOrder.deliveryAddress || '';
+        }
+
+        if (newOrder.orderType === 'pickup') {
+            orderData.customerName = newOrder.customerName || '';
+            orderData.customerPhone = newOrder.customerPhone || '';
+        }
+
+        const result = await collection.insertOne(orderData);
 
         // Si es una orden de mesa, ocupar la mesa
         if (newOrder.orderType === 'table') {
             const tablesCollection = req.db.collection('tables');
             await tablesCollection.updateOne(
-                {
-                    number: parseInt(newOrder.table),
-                    companyId: req.user.companyId
-                },
+                { _id: tableData._id },
                 {
                     $set: {
                         status: TABLE_STATUS.OCCUPIED,
                         currentOrder: result.insertedId,
                         occupiedAt: new Date(),
-                        occupiedBy: req.user.id
+                        occupiedBy: req.user.userId
                     }
                 }
             );
@@ -91,7 +175,11 @@ router.post('/', authenticateToken, requireRole(['admin', 'manager', 'mesero']),
         res.status(201).json({
             message: 'Orden creada exitosamente',
             orderId: result.insertedId,
-            tableStatus: newOrder.orderType === 'table' ? 'Mesa ocupada exitosamente' : null
+            order: {
+                ...orderData,
+                _id: result.insertedId
+            },
+            tableStatus: newOrder.orderType === 'table' ? `Mesa ${tableData.number} ocupada exitosamente` : null
         });
 
     } catch (error) {
@@ -106,14 +194,138 @@ router.get('/', authenticateToken, requireRole(['admin', 'manager', 'mesero']), 
     try {
         const collection = req.db.collection('orders');
 
-        // Filtrar por empresa del usuario autenticado
-        const filter = {
-            companyId: req.user.companyId
-        };
+        // Usar agregación para hacer lookups y traer información completa
+        const pipeline = [
+            // Filtrar por empresa del usuario autenticado
+            {
+                $match: {
+                    companyId: req.user.companyId
+                }
+            },
+            // Lookup para obtener información de la mesa (si es orden de mesa)
+            {
+                $lookup: {
+                    from: 'tables',
+                    let: { tableId: { $toObjectId: '$tableId' } },
+                    pipeline: [
+                        {
+                            $match: {
+                                $expr: { $eq: ['$_id', '$$tableId'] }
+                            }
+                        },
+                        {
+                            $project: {
+                                number: 1,
+                                capacity: 1,
+                                location: 1,
+                                status: 1
+                            }
+                        }
+                    ],
+                    as: 'tableInfo'
+                }
+            },
+            // Lookup para obtener información de la empresa
+            {
+                $lookup: {
+                    from: 'companies',
+                    let: { companyId: { $toObjectId: '$companyId' } },
+                    pipeline: [
+                        {
+                            $match: {
+                                $expr: { $eq: ['$_id', '$$companyId'] }
+                            }
+                        },
+                        {
+                            $project: {
+                                name: 1,
+                                businessName: 1,
+                                address: 1
+                            }
+                        }
+                    ],
+                    as: 'companyInfo'
+                }
+            },
+            // Lookup para obtener información del usuario que creó la orden
+            {
+                $lookup: {
+                    from: 'users',
+                    let: { createdBy: { $toObjectId: '$createdBy' } },
+                    pipeline: [
+                        {
+                            $match: {
+                                $expr: { $eq: ['$_id', '$$createdBy'] }
+                            }
+                        },
+                        {
+                            $project: {
+                                name: 1,
+                                email: 1,
+                                role: 1
+                            }
+                        }
+                    ],
+                    as: 'createdByInfo'
+                }
+            },
+            // Reestructurar el resultado
+            {
+                $addFields: {
+                    tableInfo: { $arrayElemAt: ['$tableInfo', 0] },
+                    companyInfo: { $arrayElemAt: ['$companyInfo', 0] },
+                    createdByInfo: { $arrayElemAt: ['$createdByInfo', 0] }
+                }
+            },
+            // Ordenar del más nuevo al más viejo
+            {
+                $sort: { createdAt: -1 }
+            }
+        ];
 
-        const orders = await collection.find(filter).sort({ createdAt: -1 }).toArray(); // -1 para ordenar del más nuevo al más viejo
-        res.status(200).json(orders);
+        const orders = await collection.aggregate(pipeline).toArray();
+        
+        // Procesar las órdenes para limpiar la estructura
+        const processedOrders = orders.map(order => {
+            const processedOrder = {
+                _id: order._id,
+                orderType: order.orderType,
+                requestedProducts: order.requestedProducts,
+                itemCount: order.itemCount,
+                total: order.total,
+                createdAt: order.createdAt,
+                status: order.status,
+                companyId: order.companyId,
+                createdBy: order.createdBy
+            };
+
+            // Agregar campos específicos según el tipo de orden
+            if (order.orderType === 'table') {
+                processedOrder.tableId = order.tableId;
+                processedOrder.peopleCount = order.peopleCount;
+                processedOrder.tableInfo = order.tableInfo || null;
+            }
+
+            if (order.orderType === 'delivery') {
+                processedOrder.customerId = order.customerId;
+                processedOrder.deliveryAddress = order.deliveryAddress;
+            }
+
+            if (order.orderType === 'pickup') {
+                processedOrder.customerName = order.customerName;
+                processedOrder.customerPhone = order.customerPhone;
+            }
+
+            // Agregar información de referencias
+            processedOrder.companyInfo = order.companyInfo || null;
+            processedOrder.createdByInfo = order.createdByInfo || null;
+
+            return processedOrder;
+        });
+
+        res.status(200).json(processedOrders);
     } catch (error) {
+        console.error("Error fetching orders:", error);
         res.status(500).json({ error: 'Error al obtener las órdenes' });
     }
 });
@@ -128,14 +340,133 @@ router.get('/:id', authenticateToken, requireRole(['admin', 'manager', 'mesero']
             return res.status(400).json({ error: 'ID de orden no válido' });
         }
 
-        const order = await collection.findOne({ _id: new ObjectId(id) });
+        // Usar agregación para obtener información completa
+        const pipeline = [
+            {
+                $match: { _id: new ObjectId(id) }
+            },
+            // Lookup para obtener información de la mesa (si es orden de mesa)
+            {
+                $lookup: {
+                    from: 'tables',
+                    let: { tableId: { $toObjectId: '$tableId' } },
+                    pipeline: [
+                        {
+                            $match: {
+                                $expr: { $eq: ['$_id', '$$tableId'] }
+                            }
+                        },
+                        {
+                            $project: {
+                                number: 1,
+                                capacity: 1,
+                                location: 1,
+                                status: 1
+                            }
+                        }
+                    ],
+                    as: 'tableInfo'
+                }
+            },
+            // Lookup para obtener información de la empresa
+            {
+                $lookup: {
+                    from: 'companies',
+                    let: { companyId: { $toObjectId: '$companyId' } },
+                    pipeline: [
+                        {
+                            $match: {
+                                $expr: { $eq: ['$_id', '$$companyId'] }
+                            }
+                        },
+                        {
+                            $project: {
+                                name: 1,
+                                businessName: 1,
+                                address: 1
+                            }
+                        }
+                    ],
+                    as: 'companyInfo'
+                }
+            },
+            // Lookup para obtener información del usuario que creó la orden
+            {
+                $lookup: {
+                    from: 'users',
+                    let: { createdBy: { $toObjectId: '$createdBy' } },
+                    pipeline: [
+                        {
+                            $match: {
+                                $expr: { $eq: ['$_id', '$$createdBy'] }
+                            }
+                        },
+                        {
+                            $project: {
+                                name: 1,
+                                email: 1,
+                                role: 1
+                            }
+                        }
+                    ],
+                    as: 'createdByInfo'
+                }
+            },
+            // Reestructurar el resultado
+            {
+                $addFields: {
+                    tableInfo: { $arrayElemAt: ['$tableInfo', 0] },
+                    companyInfo: { $arrayElemAt: ['$companyInfo', 0] },
+                    createdByInfo: { $arrayElemAt: ['$createdByInfo', 0] }
+                }
+            }
+        ];
 
-        if (order) {
-            res.status(200).json(order);
-        } else {
-            res.status(404).json({ error: 'Orden no encontrada' });
+        const orders = await collection.aggregate(pipeline).toArray();
+        
+        if (orders.length === 0) {
+            return res.status(404).json({ error: 'Orden no encontrada' });
         }
+
+        const order = orders[0];
+        
+        // Procesar la orden para limpiar la estructura
+        const processedOrder = {
+            _id: order._id,
+            orderType: order.orderType,
+            requestedProducts: order.requestedProducts,
+            itemCount: order.itemCount,
+            total: order.total,
+            createdAt: order.createdAt,
+            status: order.status,
+            companyId: order.companyId,
+            createdBy: order.createdBy
+        };
+
+        // Agregar campos específicos según el tipo de orden
+        if (order.orderType === 'table') {
+            processedOrder.tableId = order.tableId;
+            processedOrder.peopleCount = order.peopleCount;
+            processedOrder.tableInfo = order.tableInfo || null;
+        }
+
+        if (order.orderType === 'delivery') {
+            processedOrder.customerId = order.customerId;
+            processedOrder.deliveryAddress = order.deliveryAddress;
+        }
+
+        if (order.orderType === 'pickup') {
+            processedOrder.customerName = order.customerName;
+            processedOrder.customerPhone = order.customerPhone;
+        }
+
+        // Agregar información de referencias
+        processedOrder.companyInfo = order.companyInfo || null;
+        processedOrder.createdByInfo = order.createdByInfo || null;
+
+        res.status(200).json(processedOrder);
     } catch (error) {
+        console.error("Error fetching order:", error);
         res.status(500).json({ error: 'Error al obtener la orden' });
     }
 });
@@ -274,13 +605,10 @@ router.patch('/:id/close', authenticateToken, requireRole(['admin', 'manager', '
 
         if (result) {
             // Si es una orden de mesa, liberar la mesa
-            if (result.orderType === 'table' && result.table) {
+            if (result.orderType === 'table' && result.tableId) {
                 const tablesCollection = req.db.collection('tables');
                 await tablesCollection.updateOne(
-                    {
-                        number: parseInt(result.table),
-                        companyId: result.companyId
-                    },
+                    { _id: new ObjectId(result.tableId) },
                     {
                         $set: {
                             status: TABLE_STATUS.AVAILABLE,
