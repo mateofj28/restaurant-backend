@@ -443,6 +443,133 @@ export const swaggerSpec = {
                     tags: { type: "array", items: { type: "string" } }
                 }
             },
+            Customer: {
+                type: "object",
+                properties: {
+                    _id: {
+                        type: "string",
+                        description: "ID único del cliente"
+                    },
+                    fullName: {
+                        type: "string",
+                        description: "Nombre completo del cliente",
+                        example: "Juan Carlos Pérez"
+                    },
+                    deliveryAddress: {
+                        type: "string",
+                        description: "Dirección de entrega",
+                        example: "Calle 123 #45-67, Apartamento 301"
+                    },
+                    city: {
+                        type: "string",
+                        description: "Ciudad",
+                        example: "Bogotá"
+                    },
+                    state: {
+                        type: "string",
+                        description: "Departamento",
+                        example: "Cundinamarca"
+                    },
+                    phoneNumber: {
+                        type: "string",
+                        description: "Número de celular",
+                        example: "+573001234567"
+                    },
+                    email: {
+                        type: "string",
+                        format: "email",
+                        description: "Correo electrónico",
+                        example: "juan.perez@email.com"
+                    },
+                    companyId: {
+                        type: "string",
+                        description: "ID de la empresa"
+                    },
+                    isActive: {
+                        type: "boolean",
+                        description: "Si el cliente está activo"
+                    },
+                    orderHistory: {
+                        type: "array",
+                        items: {
+                            type: "object",
+                            properties: {
+                                orderId: { type: "string", description: "ID de la orden" },
+                                orderDate: { type: "string", format: "date-time", description: "Fecha de la orden" },
+                                totalAmount: { type: "number", description: "Monto total de la orden" }
+                            }
+                        },
+                        description: "Historial de órdenes del cliente"
+                    },
+                    preferences: {
+                        type: "object",
+                        properties: {
+                            preferredDeliveryTime: {
+                                type: "string",
+                                enum: ["morning", "afternoon", "evening", "night"],
+                                description: "Horario preferido de entrega"
+                            },
+                            specialInstructions: {
+                                type: "string",
+                                description: "Instrucciones especiales de entrega"
+                            }
+                        }
+                    },
+                    totalOrders: {
+                        type: "integer",
+                        description: "Número total de órdenes (virtual)"
+                    },
+                    totalSpent: {
+                        type: "number",
+                        description: "Total gastado por el cliente (virtual)"
+                    },
+                    formattedPhone: {
+                        type: "string",
+                        description: "Teléfono formateado (virtual)",
+                        example: "+57 300 123 4567"
+                    },
+                    createdBy: {
+                        type: "string",
+                        description: "ID del usuario que creó el cliente"
+                    },
+                    updatedBy: {
+                        type: "string",
+                        description: "ID del usuario que actualizó el cliente"
+                    },
+                    createdAt: {
+                        type: "string",
+                        format: "date-time",
+                        description: "Fecha de creación"
+                    },
+                    updatedAt: {
+                        type: "string",
+                        format: "date-time",
+                        description: "Fecha de última actualización"
+                    }
+                }
+            },
+            CustomerUpdate: {
+                type: "object",
+                description: "Esquema para actualizar cliente",
+                properties: {
+                    fullName: { type: "string", example: "Juan Carlos Pérez Actualizado" },
+                    deliveryAddress: { type: "string", example: "Nueva Calle 456 #78-90" },
+                    city: { type: "string", example: "Medellín" },
+                    state: { type: "string", example: "Antioquia" },
+                    phoneNumber: { type: "string", example: "+573009876543" },
+                    email: { type: "string", format: "email", example: "juan.nuevo@email.com" },
+                    preferences: {
+                        type: "object",
+                        properties: {
+                            preferredDeliveryTime: {
+                                type: "string",
+                                enum: ["morning", "afternoon", "evening", "night"]
+                            },
+                            specialInstructions: { type: "string" }
+                        }
+                    }
+                }
+            },
             Pagination: {
                 type: "object",
                 properties: {
@@ -1739,6 +1866,325 @@ export const swaggerSpec = {
                                         mostPopularProducts: { type: "array", items: { "$ref": "#/components/schemas/Product" } }
                                     }
                                 }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/customers": {
+            get: {
+                tags: ["Clientes"],
+                summary: "Obtener todos los clientes con filtros (Admin/Manager/Mesero)",
+                security: [{ bearerAuth: [] }],
+                parameters: [
+                    {
+                        in: "query",
+                        name: "isActive",
+                        schema: {
+                            type: "string",
+                            enum: ["true", "false", "all"],
+                            default: "true"
+                        },
+                        description: "Filtrar por estado activo"
+                    },
+                    {
+                        in: "query",
+                        name: "search",
+                        schema: { type: "string" },
+                        description: "Buscar en nombre, email o teléfono"
+                    },
+                    {
+                        in: "query",
+                        name: "city",
+                        schema: { type: "string" },
+                        description: "Filtrar por ciudad"
+                    },
+                    {
+                        in: "query",
+                        name: "state",
+                        schema: { type: "string" },
+                        description: "Filtrar por departamento"
+                    },
+                    {
+                        in: "query",
+                        name: "page",
+                        schema: { type: "integer", default: 1 },
+                        description: "Número de página"
+                    },
+                    {
+                        in: "query",
+                        name: "limit",
+                        schema: { type: "integer", default: 20 },
+                        description: "Elementos por página"
+                    },
+                    {
+                        in: "query",
+                        name: "sortBy",
+                        schema: { type: "string", default: "fullName" },
+                        description: "Campo para ordenar"
+                    },
+                    {
+                        in: "query",
+                        name: "sortOrder",
+                        schema: { type: "string", enum: ["asc", "desc"], default: "asc" },
+                        description: "Orden de clasificación"
+                    }
+                ],
+                responses: {
+                    "200": {
+                        description: "Lista de clientes obtenida exitosamente",
+                        content: {
+                            "application/json": {
+                                schema: {
+                                    type: "object",
+                                    properties: {
+                                        customers: {
+                                            type: "array",
+                                            items: { "$ref": "#/components/schemas/Customer" }
+                                        },
+                                        pagination: { "$ref": "#/components/schemas/Pagination" },
+                                        stats: {
+                                            type: "object",
+                                            properties: {
+                                                totalCustomers: { type: "integer" },
+                                                totalOrders: { type: "integer" },
+                                                avgOrdersPerCustomer: { type: "number" }
+                                            }
+                                        },
+                                        citiesStats: {
+                                            type: "array",
+                                            items: {
+                                                type: "object",
+                                                properties: {
+                                                    _id: { type: "string", description: "Nombre de la ciudad" },
+                                                    count: { type: "integer", description: "Número de clientes" }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            post: {
+                tags: ["Clientes"],
+                summary: "Crear nuevo cliente (Admin/Manager/Mesero)",
+                security: [{ bearerAuth: [] }],
+                requestBody: {
+                    required: true,
+                    content: {
+                        "application/json": {
+                            schema: {
+                                type: "object",
+                                required: ["fullName", "deliveryAddress", "city", "state", "phoneNumber", "email"],
+                                properties: {
+                                    fullName: { type: "string", example: "Juan Carlos Pérez" },
+                                    deliveryAddress: { type: "string", example: "Calle 123 #45-67, Apartamento 301" },
+                                    city: { type: "string", example: "Bogotá" },
+                                    state: { type: "string", example: "Cundinamarca" },
+                                    phoneNumber: { type: "string", example: "+573001234567" },
+                                    email: { type: "string", format: "email", example: "juan.perez@email.com" },
+                                    preferences: {
+                                        type: "object",
+                                        properties: {
+                                            preferredDeliveryTime: {
+                                                type: "string",
+                                                enum: ["morning", "afternoon", "evening", "night"],
+                                                example: "afternoon"
+                                            },
+                                            specialInstructions: {
+                                                type: "string",
+                                                example: "Tocar el timbre dos veces"
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                responses: {
+                    "201": {
+                        description: "Cliente creado exitosamente",
+                        content: {
+                            "application/json": {
+                                schema: { "$ref": "#/components/schemas/Customer" }
+                            }
+                        }
+                    },
+                    "400": { description: "Datos inválidos o cliente duplicado" }
+                }
+            }
+        },
+        "/api/customers/search": {
+            get: {
+                tags: ["Clientes"],
+                summary: "Buscar clientes por nombre, email o teléfono (Admin/Manager/Mesero)",
+                security: [{ bearerAuth: [] }],
+                parameters: [
+                    {
+                        in: "query",
+                        name: "query",
+                        required: true,
+                        schema: { type: "string", minLength: 3 },
+                        description: "Texto a buscar (mínimo 3 caracteres)",
+                        example: "juan"
+                    }
+                ],
+                responses: {
+                    "200": {
+                        description: "Resultados de búsqueda",
+                        content: {
+                            "application/json": {
+                                schema: {
+                                    type: "array",
+                                    items: {
+                                        type: "object",
+                                        properties: {
+                                            _id: { type: "string" },
+                                            fullName: { type: "string" },
+                                            email: { type: "string" },
+                                            phoneNumber: { type: "string" },
+                                            deliveryAddress: { type: "string" },
+                                            city: { type: "string" },
+                                            state: { type: "string" }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "400": { description: "Búsqueda muy corta" }
+                }
+            }
+        },
+        "/api/customers/{id}": {
+            get: {
+                tags: ["Clientes"],
+                summary: "Obtener cliente por ID (Admin/Manager/Mesero)",
+                security: [{ bearerAuth: [] }],
+                parameters: [
+                    {
+                        in: "path",
+                        name: "id",
+                        required: true,
+                        schema: { type: "string" },
+                        description: "ID del cliente"
+                    }
+                ],
+                responses: {
+                    "200": {
+                        description: "Cliente obtenido exitosamente",
+                        content: {
+                            "application/json": {
+                                schema: { "$ref": "#/components/schemas/Customer" }
+                            }
+                        }
+                    },
+                    "404": { description: "Cliente no encontrado" }
+                }
+            },
+            put: {
+                tags: ["Clientes"],
+                summary: "Actualizar cliente - Solo Admin/Manager",
+                security: [{ bearerAuth: [] }],
+                parameters: [
+                    {
+                        in: "path",
+                        name: "id",
+                        required: true,
+                        schema: { type: "string" },
+                        description: "ID del cliente"
+                    }
+                ],
+                requestBody: {
+                    required: true,
+                    content: {
+                        "application/json": {
+                            schema: { "$ref": "#/components/schemas/CustomerUpdate" }
+                        }
+                    }
+                },
+                responses: {
+                    "200": {
+                        description: "Cliente actualizado exitosamente",
+                        content: {
+                            "application/json": {
+                                schema: { "$ref": "#/components/schemas/Customer" }
+                            }
+                        }
+                    },
+                    "404": { description: "Cliente no encontrado" }
+                }
+            },
+            delete: {
+                tags: ["Clientes"],
+                summary: "Desactivar cliente - Solo Admin/Manager",
+                security: [{ bearerAuth: [] }],
+                parameters: [
+                    {
+                        in: "path",
+                        name: "id",
+                        required: true,
+                        schema: { type: "string" },
+                        description: "ID del cliente"
+                    }
+                ],
+                responses: {
+                    "200": {
+                        description: "Cliente desactivado exitosamente",
+                        content: {
+                            "application/json": {
+                                schema: {
+                                    type: "object",
+                                    properties: {
+                                        message: { type: "string", example: "Cliente desactivado correctamente" }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/customers/{id}/orders": {
+            post: {
+                tags: ["Clientes"],
+                summary: "Agregar orden al historial del cliente (Admin/Manager/Mesero)",
+                security: [{ bearerAuth: [] }],
+                parameters: [
+                    {
+                        in: "path",
+                        name: "id",
+                        required: true,
+                        schema: { type: "string" },
+                        description: "ID del cliente"
+                    }
+                ],
+                requestBody: {
+                    required: true,
+                    content: {
+                        "application/json": {
+                            schema: {
+                                type: "object",
+                                required: ["orderId", "totalAmount"],
+                                properties: {
+                                    orderId: { type: "string", example: "60d5ecb74b24a1234567890a" },
+                                    totalAmount: { type: "number", example: 45000 }
+                                }
+                            }
+                        }
+                    }
+                },
+                responses: {
+                    "200": {
+                        description: "Orden agregada al historial exitosamente",
+                        content: {
+                            "application/json": {
+                                schema: { "$ref": "#/components/schemas/Customer" }
                             }
                         }
                     }

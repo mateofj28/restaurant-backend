@@ -6,6 +6,7 @@ import authRoutes from './routes/auth.routes.js';
 import companyRoutes from './routes/companies.routes.js';
 import tableRoutes from './routes/tables.routes.js';
 import productRoutes from './routes/products.routes.js';
+import customerRoutes from './routes/customers.routes.js';
 import { createSwaggerHTML, swaggerSpec } from './config/swagger-simple.js';
 
 // Ahora la función recibe la instancia de 'db' como argumento
@@ -51,6 +52,9 @@ export function createApp(db) {
     // Rutas de productos
     app.use('/api/products', productRoutes);
     
+    // Rutas de clientes
+    app.use('/api/customers', customerRoutes);
+    
 
     app.use('/api/orders', orderRoutes);
 
@@ -94,6 +98,16 @@ export function createApp(db) {
                 <li><strong>PATCH</strong> /api/products/:id/availability - Cambiar disponibilidad</li>
                 <li><strong>DELETE</strong> /api/products/:id - Desactivar producto</li>
                 <li><strong>GET</strong> /api/products/menu/:companyId - Menú público por empresa</li>
+            </ul>
+            <h3>👥 Clientes (Domicilios):</h3>
+            <ul>
+                <li><strong>GET</strong> /api/customers - Listar clientes con filtros</li>
+                <li><strong>POST</strong> /api/customers - Crear cliente</li>
+                <li><strong>GET</strong> /api/customers/:id - Obtener cliente por ID</li>
+                <li><strong>PUT</strong> /api/customers/:id - Actualizar cliente</li>
+                <li><strong>DELETE</strong> /api/customers/:id - Desactivar cliente</li>
+                <li><strong>GET</strong> /api/customers/search - Buscar clientes</li>
+                <li><strong>POST</strong> /api/customers/:id/orders - Agregar orden al historial</li>
             </ul>
             <h3>📦 Órdenes:</h3>
             <ul>

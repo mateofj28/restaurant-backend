@@ -2,11 +2,12 @@
 import { Router } from 'express';
 import { ObjectId } from '../config/db.js';
 import { TABLE_STATUS } from './tables.routes.js';
+import { authenticateToken, requireRole } from '../middleware/auth.js';
 
 const router = Router();
 
 // POST: Crear una nueva orden
-router.post('/', async (req, res) => {
+router.post('/', authenticateToken, requireRole(['admin', 'manager', 'mesero']), async (req, res) => {
     try {
         const collection = req.db.collection('orders');
         const newOrder = req.body;
@@ -32,7 +33,7 @@ router.post('/', async (req, res) => {
             const tablesCollection = req.db.collection('tables');
             const table = await tablesCollection.findOne({
                 number: parseInt(newOrder.table),
-                companyId: req.user?.companyId,
+                companyId: req.user.companyId,
                 isActive: true
             });
 
@@ -62,8 +63,8 @@ router.post('/', async (req, res) => {
         // --- Añadir datos automáticos del servidor ---
         newOrder.createdAt = new Date();
         newOrder.status = 'received'; // Estado inicial de la orden
-        newOrder.companyId = req.user?.companyId; // Asociar con la empresa del usuario
-        newOrder.createdBy = req.user?.userId; // Usuario que creó la orden
+        newOrder.companyId = req.user.companyId; // Asociar con la empresa del usuario
+        newOrder.createdBy = req.user.id; // Usuario que creó la orden
 
         const result = await collection.insertOne(newOrder);
 
@@ -73,14 +74,14 @@ router.post('/', async (req, res) => {
             await tablesCollection.updateOne(
                 {
                     number: parseInt(newOrder.table),
-                    companyId: req.user?.companyId
+                    companyId: req.user.companyId
                 },
                 {
                     $set: {
                         status: TABLE_STATUS.OCCUPIED,
                         currentOrder: result.insertedId,
                         occupiedAt: new Date(),
-                        occupiedBy: req.user?.userId
+                        occupiedBy: req.user.id
                     }
                 }
             );
@@ -101,15 +102,14 @@ router.post('/', async (req, res) => {
 
 
 // GET: Listar todas las órdenes
-router.get('/', async (req, res) => {
+router.get('/', authenticateToken, requireRole(['admin', 'manager', 'mesero']), async (req, res) => {
     try {
         const collection = req.db.collection('orders');
 
-        // Filtrar por empresa si el usuario no es admin
-        const filter = {};
-        if (req.user?.companyId) {
-            filter.companyId = req.user.companyId;
-        }
+        // Filtrar por empresa del usuario autenticado
+        const filter = {
+            companyId: req.user.companyId
+        };
 
         const orders = await collection.find(filter).sort({ createdAt: -1 }).toArray(); // -1 para ordenar del más nuevo al más viejo
         res.status(200).json(orders);
@@ -119,7 +119,7 @@ router.get('/', async (req, res) => {
 });
 
 // GET: Obtener una orden específica por su ID
-router.get('/:id', async (req, res) => {
+router.get('/:id', authenticateToken, requireRole(['admin', 'manager', 'mesero']), async (req, res) => {
     try {
         const collection = req.db.collection('orders');
         const { id } = req.params;
@@ -141,7 +141,7 @@ router.get('/:id', async (req, res) => {
 });
 
 // UPDATE: Actualizar una orden por su ID
-router.put('/:id', async (req, res) => {
+router.put('/:id', authenticateToken, requireRole(['admin', 'manager', 'mesero']), async (req, res) => {
     try {
         const collection = req.db.collection('orders');
         const { id } = req.params;
@@ -228,7 +228,7 @@ router.put('/:id', async (req, res) => {
 });
 
 // PATCH: Cerrar cocina - Endpoint específico para el botón "Cerrar cocina"
-router.patch('/:id/close', async (req, res) => {
+router.patch('/:id/close', authenticateToken, requireRole(['admin', 'manager', 'mesero']), async (req, res) => {
     try {
         const collection = req.db.collection('orders');
         const { id } = req.params;
