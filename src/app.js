@@ -1,6 +1,6 @@
 // src/app.js
 import express from 'express';
-import userRoutes from './routes/usuario.routes.js';
+
 import orderRoutes from './routes/ordenes.routes.js';
 import authRoutes from './routes/auth.routes.js';
 import companyRoutes from './routes/companies.routes.js';
@@ -24,11 +24,7 @@ export function createApp(db) {
     app.use('/uploads', express.static('uploads'));
     app.use('/images', express.static('public/images'));
     
-    // Ruta específica para test-images.html
-    app.get('/test-images.html', (req, res) => {
-        res.setHeader('Content-Type', 'text/html; charset=utf-8');
-        res.sendFile('test-images.html', { root: './public' });
-    });
+
     
     app.use(express.static('public')); // Servir otros archivos del directorio public
     
@@ -55,15 +51,14 @@ export function createApp(db) {
     // Rutas de productos
     app.use('/api/products', productRoutes);
     
-    // Rutas existentes
-    app.use('/api/users', userRoutes);
+
     app.use('/api/orders', orderRoutes);
 
     app.get('/', (req, res) => {
         res.send(`
             <h1>🚀 API de Restaurant funcionando con autenticación!</h1>
             <p><a href="/api-docs" target="_blank" style="font-size: 18px; color: #007bff;">📖 Ver Documentación Swagger</a></p>
-            <p><a href="/test-images.html" target="_blank" style="font-size: 18px; color: #28a745;">🖼️ Verificar Imágenes de Productos</a></p>
+
             <h2>📋 Endpoints disponibles:</h2>
             <h3>🔐 Autenticación:</h3>
             <ul>
@@ -108,14 +103,7 @@ export function createApp(db) {
                 <li><strong>PUT</strong> /api/orders/:id - Actualizar orden</li>
                 <li><strong>PATCH</strong> /api/orders/:id/close - Cerrar cocina</li>
             </ul>
-            <h3>👥 Usuarios:</h3>
-            <ul>
-                <li><strong>GET</strong> /api/users - Listar usuarios</li>
-                <li><strong>POST</strong> /api/users - Crear usuario</li>
-                <li><strong>GET</strong> /api/users/:id - Obtener usuario por ID</li>
-                <li><strong>PUT</strong> /api/users/:id - Actualizar usuario</li>
-                <li><strong>DELETE</strong> /api/users/:id - Eliminar usuario</li>
-            </ul>
+
         `);
     });
 
