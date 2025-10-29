@@ -1,0 +1,32 @@
+<svg width="400" height="400" xmlns="http://www.w3.org/2000/svg">
+  <!-- Plato -->
+  <ellipse cx="200" cy="250" rx="150" ry="120" fill="#f8f9fa" stroke="#dee2e6" stroke-width="3"/>
+  
+  <!-- Base del tiramisu -->
+  <rect x="120" y="200" width="160" height="80" rx="10" fill="#8b4513"/>
+  
+  <!-- Capa de mascarpone -->
+  <rect x="125" y="190" width="150" height="20" rx="8" fill="#fff8dc"/>
+  <rect x="125" y="220" width="150" height="20" rx="8" fill="#fff8dc"/>
+  <rect x="125" y="250" width="150" height="20" rx="8" fill="#fff8dc"/>
+  
+  <!-- Capas de bizcocho -->
+  <rect x="125" y="210" width="150" height="10" fill="#deb887"/>
+  <rect x="125" y="240" width="150" height="10" fill="#deb887"/>
+  
+  <!-- Cacao en polvo encima -->
+  <rect x="125" y="185" width="150" height="15" rx="8" fill="#654321" opacity="0.7"/>
+  
+  <!-- Decoración con cacao -->
+  <circle cx="160" cy="192" r="2" fill="#3e2723"/>
+  <circle cx="180" cy="190" r="1.5" fill="#3e2723"/>
+  <circle cx="200" cy="193" r="2" fill="#3e2723"/>
+  <circle cx="220" cy="191" r="1.5" fill="#3e2723"/>
+  <circle cx="240" cy="192" r="2" fill="#3e2723"/>
+  
+  <!-- Hoja de menta decorativa -->
+  <ellipse cx="200" cy="175" rx="6" ry="12" fill="#228b22"/>
+  <line x1="200" y1="175" x2="200" y2="185" stroke="#006400" stroke-width="1"/>
+  
+  <text x="200" y="350" text-anchor="middle" font-family="Arial, sans-serif" font-size="16" fill="#6c757d">Tiramisú</text>
+</svg>

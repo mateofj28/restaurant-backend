@@ -1,6 +1,7 @@
 // En src/routes/ordenes.routes.js
 import { Router } from 'express';
 import { ObjectId } from '../config/db.js';
+import { TABLE_STATUS } from './tables.routes.js';
 
 const router = Router();
 
@@ -21,7 +22,39 @@ router.post('/', async (req, res) => {
             return res.status(400).json({ error: 'Para pedidos a domicilio, el idCliente es obligatorio.' });
         }
 
-        // 3. La lista de productos no puede estar vacía
+        // 3. Si es mesa, validar disponibilidad de mesa
+        if (newOrder.orderType === 'table') {
+            if (!newOrder.table) {
+                return res.status(400).json({ error: 'Para pedidos en mesa, el número de mesa es obligatorio.' });
+            }
+
+            // Verificar disponibilidad de mesa
+            const tablesCollection = req.db.collection('tables');
+            const table = await tablesCollection.findOne({
+                number: parseInt(newOrder.table),
+                companyId: req.user?.companyId,
+                isActive: true
+            });
+
+            if (!table) {
+                return res.status(404).json({ error: `Mesa ${newOrder.table} no encontrada.` });
+            }
+
+            if (table.status !== TABLE_STATUS.AVAILABLE) {
+                return res.status(400).json({
+                    error: `Mesa ${newOrder.table} no está disponible. Estado actual: ${table.status}`
+                });
+            }
+
+            // Verificar capacidad si se proporciona peopleCount
+            if (newOrder.peopleCount && table.capacity < newOrder.peopleCount) {
+                return res.status(400).json({
+                    error: `Mesa ${newOrder.table} tiene capacidad para ${table.capacity} personas, pero se solicitó para ${newOrder.peopleCount}`
+                });
+            }
+        }
+
+        // 4. La lista de productos no puede estar vacía
         if (!newOrder.requestedProducts || newOrder.requestedProducts.length === 0) {
             return res.status(400).json({ error: 'La orden debe contener al menos un producto.' });
         }
@@ -29,13 +62,35 @@ router.post('/', async (req, res) => {
         // --- Añadir datos automáticos del servidor ---
         newOrder.createdAt = new Date();
         newOrder.status = 'received'; // Estado inicial de la orden
+        newOrder.companyId = req.user?.companyId; // Asociar con la empresa del usuario
+        newOrder.createdBy = req.user?.userId; // Usuario que creó la orden
 
         const result = await collection.insertOne(newOrder);
+
+        // Si es una orden de mesa, ocupar la mesa
+        if (newOrder.orderType === 'table') {
+            const tablesCollection = req.db.collection('tables');
+            await tablesCollection.updateOne(
+                {
+                    number: parseInt(newOrder.table),
+                    companyId: req.user?.companyId
+                },
+                {
+                    $set: {
+                        status: TABLE_STATUS.OCCUPIED,
+                        currentOrder: result.insertedId,
+                        occupiedAt: new Date(),
+                        occupiedBy: req.user?.userId
+                    }
+                }
+            );
+        }
 
         // Devolvemos una respuesta 201 (Created) con el ID del nuevo documento
         res.status(201).json({
             message: 'Orden creada exitosamente',
-            orderId: result.insertedId
+            orderId: result.insertedId,
+            tableStatus: newOrder.orderType === 'table' ? 'Mesa ocupada exitosamente' : null
         });
 
     } catch (error) {
@@ -49,7 +104,14 @@ router.post('/', async (req, res) => {
 router.get('/', async (req, res) => {
     try {
         const collection = req.db.collection('orders');
-        const orders = await collection.find({}).sort({ createdAt: -1 }).toArray(); // -1 para ordenar del más nuevo al más viejo
+
+        // Filtrar por empresa si el usuario no es admin
+        const filter = {};
+        if (req.user?.companyId) {
+            filter.companyId = req.user.companyId;
+        }
+
+        const orders = await collection.find(filter).sort({ createdAt: -1 }).toArray(); // -1 para ordenar del más nuevo al más viejo
         res.status(200).json(orders);
     } catch (error) {
         res.status(500).json({ error: 'Error al obtener las órdenes' });
@@ -211,9 +273,29 @@ router.patch('/:id/close', async (req, res) => {
         );
 
         if (result) {
+            // Si es una orden de mesa, liberar la mesa
+            if (result.orderType === 'table' && result.table) {
+                const tablesCollection = req.db.collection('tables');
+                await tablesCollection.updateOne(
+                    {
+                        number: parseInt(result.table),
+                        companyId: result.companyId
+                    },
+                    {
+                        $set: {
+                            status: TABLE_STATUS.AVAILABLE,
+                            currentOrder: null,
+                            occupiedAt: null,
+                            occupiedBy: null
+                        }
+                    }
+                );
+            }
+
             res.status(200).json({
                 message: 'Cocina cerrada exitosamente',
-                order: result
+                order: result,
+                tableStatus: result.orderType === 'table' ? 'Mesa liberada exitosamente' : null
             });
         } else {
             res.status(404).json({ error: 'Orden no encontrada' });
