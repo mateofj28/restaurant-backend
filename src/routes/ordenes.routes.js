@@ -471,92 +471,371 @@ router.get('/:id', authenticateToken, requireRole(['admin', 'manager', 'mesero']
     }
 });
 
-// UPDATE: Actualizar una orden por su ID
+// UPDATE: Actualizar una orden por su ID - IMPLEMENTACIÓN COMPLETA
 router.put('/:id', authenticateToken, requireRole(['admin', 'manager', 'mesero']), async (req, res) => {
     try {
         const collection = req.db.collection('orders');
         const { id } = req.params;
-        const updatedOrder = req.body;
+        const { orderType, tableId, peopleCount, requestedProducts } = req.body;
 
         if (!ObjectId.isValid(id)) {
             return res.status(400).json({ error: 'ID de orden no válido' });
         }
 
-        // --- Lógica especial: Caso 1 - Verificar si requestedProducts viene vacío directamente ---
-        if (updatedOrder.requestedProducts && updatedOrder.requestedProducts.length === 0) {
-            // Si requestedProducts está vacío, eliminar la orden automáticamente
+        // 1. OBTENER ORDEN ACTUAL
+        const currentOrder = await collection.findOne({ _id: new ObjectId(id) });
+        if (!currentOrder) {
+            return res.status(404).json({ error: 'Orden no encontrada' });
+        }
+
+        // 2. CASO ESPECIAL: Si no hay productos, eliminar orden
+        if (!requestedProducts || requestedProducts.length === 0) {
             const deleteResult = await collection.deleteOne({ _id: new ObjectId(id) });
-
-            if (deleteResult.deletedCount > 0) {
-                return res.status(200).json({
-                    message: 'Orden eliminada automáticamente porque no tiene productos',
-                    deleted: true,
-                    orderId: id
-                });
-            } else {
-                return res.status(404).json({ error: 'Orden no encontrada' });
-            }
-        }
-
-        // --- Lógica especial: Caso 2 - Cerrar cocina ---
-        if (updatedOrder.status === 'closed') {
-            // Cuando se cierra la cocina, actualizar todos los productos pendientes o en preparación
-            const currentOrder = await collection.findOne({ _id: new ObjectId(id) });
-
-            if (!currentOrder) {
-                return res.status(404).json({ error: 'Orden no encontrada' });
-            }
-
-            // Actualizar automáticamente los estados de productos que no están entregados
-            if (currentOrder.requestedProducts) {
-                updatedOrder.requestedProducts = currentOrder.requestedProducts.map(product => {
-                    const updatedProduct = { ...product };
-                    updatedProduct.statusByQuantity = product.statusByQuantity.map(statusItem => {
-                        // Solo cambiar estados que no sean "entregado"
-                        if (statusItem.status !== 'entregado') {
-                            return { status: 'listo para entregar' };
+            
+            // Liberar mesa si era orden de mesa
+            if (currentOrder.orderType === 'table' && currentOrder.tableId) {
+                const tablesCollection = req.db.collection('tables');
+                await tablesCollection.updateOne(
+                    { _id: new ObjectId(currentOrder.tableId) },
+                    {
+                        $set: {
+                            status: TABLE_STATUS.AVAILABLE,
+                            currentOrder: null,
+                            occupiedAt: null,
+                            occupiedBy: null
                         }
-                        return statusItem;
-                    });
-                    return updatedProduct;
-                });
+                    }
+                );
             }
 
-            // Agregar timestamp de cierre
-            updatedOrder.closedAt = new Date();
+            return res.status(200).json({
+                message: 'Orden eliminada automáticamente porque no tiene productos',
+                deleted: true,
+                orderId: id
+            });
         }
 
-        // --- Actualización normal ---
-        const result = await collection.findOneAndUpdate(
-            { _id: new ObjectId(id) },
-            { $set: updatedOrder },
-            { returnDocument: 'after' }
-        );
+        // 3. VALIDAR PRODUCTOS NUEVOS (solo los que no existían antes)
+        const productsCollection = req.db.collection('products');
+        const newProductIds = requestedProducts
+            .filter(p => !currentOrder.requestedProducts.some(cp => cp.productId === p.productId))
+            .map(p => p.productId);
 
-        if (result) {
-            // --- Verificar DESPUÉS de la actualización si quedó sin productos ---
-            if (result.requestedProducts && result.requestedProducts.length === 0) {
-                // Si después de actualizar no quedan productos, eliminar la orden
-                const deleteResult = await collection.deleteOne({ _id: new ObjectId(id) });
+        for (const productId of newProductIds) {
+            const product = await productsCollection.findOne({
+                _id: new ObjectId(productId),
+                companyId: new ObjectId(req.user.companyId),
+                isActive: true
+            });
 
-                if (deleteResult.deletedCount > 0) {
-                    return res.status(200).json({
-                        message: 'Orden eliminada automáticamente porque quedó sin productos después de la actualización',
-                        deleted: true,
-                        orderId: id
+            if (!product) {
+                return res.status(404).json({
+                    error: `Producto con ID ${productId} no encontrado.`
+                });
+            }
+        }
+
+        // 4. PROCESAR PRODUCTOS CON LÓGICA INTELIGENTE
+        const processedProducts = requestedProducts.map(product => {
+            // Buscar si el producto ya existía en la orden
+            const existingProduct = currentOrder.requestedProducts.find(p => p.productId === product.productId);
+
+            if (existingProduct) {
+                // PRODUCTO EXISTENTE: Mantener estados existentes según la cantidad
+                if (existingProduct.requestedQuantity === product.requestedQuantity) {
+                    // Cantidad igual: mantener estados existentes
+                    return {
+                        ...product,
+                        statusByQuantity: existingProduct.statusByQuantity
+                    };
+                } else if (existingProduct.requestedQuantity < product.requestedQuantity) {
+                    // Cantidad aumentó: mantener estados existentes + agregar nuevos como 'pendiente'
+                    const newStatuses = [];
+                    for (let i = 0; i < product.requestedQuantity; i++) {
+                        if (i < existingProduct.statusByQuantity.length) {
+                            newStatuses.push(existingProduct.statusByQuantity[i]);
+                        } else {
+                            newStatuses.push({ index: i + 1, status: 'pendiente' });
+                        }
+                    }
+                    return {
+                        ...product,
+                        statusByQuantity: newStatuses
+                    };
+                } else {
+                    // Cantidad disminuyó: mantener solo los primeros estados
+                    return {
+                        ...product,
+                        statusByQuantity: existingProduct.statusByQuantity.slice(0, product.requestedQuantity)
+                    };
+                }
+            } else {
+                // PRODUCTO NUEVO: usar estados que vienen del frontend o crear como 'pendiente'
+                if (!product.statusByQuantity || product.statusByQuantity.length !== product.requestedQuantity) {
+                    const newStatuses = [];
+                    for (let i = 0; i < product.requestedQuantity; i++) {
+                        newStatuses.push({ index: i + 1, status: 'pendiente' });
+                    }
+                    return {
+                        ...product,
+                        statusByQuantity: newStatuses
+                    };
+                }
+                return product;
+            }
+        });
+
+        // 5. CALCULAR TOTAL
+        const total = processedProducts.reduce((sum, product) => {
+            return sum + (product.productSnapshot.price * product.requestedQuantity);
+        }, 0);
+
+        // 6. VALIDAR Y MANEJAR CAMBIO DE MESA
+        let newTableData = null;
+        if (orderType === 'table') {
+            if (!tableId) {
+                return res.status(400).json({ error: 'tableId es obligatorio para órdenes de mesa' });
+            }
+
+            // Validar que la nueva mesa esté disponible (si cambió)
+            if (currentOrder.tableId !== tableId) {
+                const tablesCollection = req.db.collection('tables');
+                newTableData = await tablesCollection.findOne({
+                    _id: new ObjectId(tableId),
+                    companyId: req.user.companyId
+                });
+
+                if (!newTableData) {
+                    return res.status(404).json({ error: 'Mesa no encontrada' });
+                }
+
+                if (newTableData.status !== TABLE_STATUS.AVAILABLE) {
+                    return res.status(400).json({
+                        error: `Mesa ${newTableData.number} no está disponible. Estado actual: ${newTableData.status}`
                     });
                 }
             }
-
-            res.status(200).json(result);
-        } else {
-            res.status(404).json({ error: 'Orden no encontrada' });
         }
+
+        // 7. PREPARAR DATOS DE ACTUALIZACIÓN
+        const updateData = {
+            orderType,
+            requestedProducts: processedProducts,
+            itemCount: processedProducts.length,
+            total: parseFloat(total.toFixed(2)),
+            updatedAt: new Date()
+        };
+
+        // Campos específicos según tipo de orden
+        if (orderType === 'table') {
+            updateData.tableId = tableId;
+            updateData.peopleCount = peopleCount || 1;
+            // Limpiar campos de otros tipos
+            updateData.customerId = null;
+            updateData.deliveryAddress = null;
+            updateData.customerName = null;
+            updateData.customerPhone = null;
+        } else if (orderType === 'delivery') {
+            updateData.tableId = null;
+            updateData.peopleCount = null;
+            updateData.customerId = req.body.customerId || null;
+            updateData.deliveryAddress = req.body.deliveryAddress || '';
+            updateData.customerName = null;
+            updateData.customerPhone = null;
+        } else if (orderType === 'pickup') {
+            updateData.tableId = null;
+            updateData.peopleCount = null;
+            updateData.customerId = null;
+            updateData.deliveryAddress = null;
+            updateData.customerName = req.body.customerName || '';
+            updateData.customerPhone = req.body.customerPhone || '';
+        }
+
+        // 8. ACTUALIZAR ORDEN
+        const result = await collection.findOneAndUpdate(
+            { _id: new ObjectId(id) },
+            { $set: updateData },
+            { returnDocument: 'after' }
+        );
+
+        if (!result) {
+            return res.status(404).json({ error: 'Orden no encontrada' });
+        }
+
+        // 9. MANEJAR CAMBIOS DE MESA
+        const tablesCollection = req.db.collection('tables');
+        
+        // Liberar mesa anterior si cambió el tipo o la mesa
+        if (currentOrder.orderType === 'table' && currentOrder.tableId && 
+            (orderType !== 'table' || currentOrder.tableId !== tableId)) {
+            await tablesCollection.updateOne(
+                { _id: new ObjectId(currentOrder.tableId) },
+                {
+                    $set: {
+                        status: TABLE_STATUS.AVAILABLE,
+                        currentOrder: null,
+                        occupiedAt: null,
+                        occupiedBy: null
+                    }
+                }
+            );
+        }
+
+        // Ocupar nueva mesa si es necesario
+        if (orderType === 'table' && newTableData) {
+            await tablesCollection.updateOne(
+                { _id: new ObjectId(tableId) },
+                {
+                    $set: {
+                        status: TABLE_STATUS.OCCUPIED,
+                        currentOrder: result._id,
+                        occupiedAt: new Date(),
+                        occupiedBy: req.user.userId
+                    }
+                }
+            );
+        }
+
+        // 10. DEVOLVER RESPUESTA ENRIQUECIDA
+        const enrichedOrder = await getEnrichedOrder(collection, result._id);
+        res.status(200).json(enrichedOrder);
+
     } catch (error) {
         console.error("Error updating order:", error);
         res.status(500).json({ error: 'Error interno del servidor al actualizar la orden' });
     }
 });
+
+// Función auxiliar para obtener orden enriquecida (reutilizable)
+async function getEnrichedOrder(collection, orderId) {
+    const pipeline = [
+        {
+            $match: { _id: new ObjectId(orderId) }
+        },
+        // Lookup para obtener información de la mesa
+        {
+            $lookup: {
+                from: 'tables',
+                let: { tableId: { $toObjectId: '$tableId' } },
+                pipeline: [
+                    {
+                        $match: {
+                            $expr: { $eq: ['$_id', '$$tableId'] }
+                        }
+                    },
+                    {
+                        $project: {
+                            number: 1,
+                            capacity: 1,
+                            location: 1,
+                            status: 1
+                        }
+                    }
+                ],
+                as: 'tableInfo'
+            }
+        },
+        // Lookup para obtener información de la empresa
+        {
+            $lookup: {
+                from: 'companies',
+                let: { companyId: { $toObjectId: '$companyId' } },
+                pipeline: [
+                    {
+                        $match: {
+                            $expr: { $eq: ['$_id', '$$companyId'] }
+                        }
+                    },
+                    {
+                        $project: {
+                            name: 1,
+                            businessName: 1,
+                            address: 1
+                        }
+                    }
+                ],
+                as: 'companyInfo'
+            }
+        },
+        // Lookup para obtener información del usuario
+        {
+            $lookup: {
+                from: 'users',
+                let: { createdBy: { $toObjectId: '$createdBy' } },
+                pipeline: [
+                    {
+                        $match: {
+                            $expr: { $eq: ['$_id', '$$createdBy'] }
+                        }
+                    },
+                    {
+                        $project: {
+                            name: 1,
+                            email: 1,
+                            role: 1
+                        }
+                    }
+                ],
+                as: 'createdByInfo'
+            }
+        },
+        {
+            $addFields: {
+                tableInfo: { $arrayElemAt: ['$tableInfo', 0] },
+                companyInfo: { $arrayElemAt: ['$companyInfo', 0] },
+                createdByInfo: { $arrayElemAt: ['$createdByInfo', 0] }
+            }
+        }
+    ];
+
+    const orders = await collection.aggregate(pipeline).toArray();
+    
+    if (orders.length === 0) {
+        return null;
+    }
+
+    const order = orders[0];
+    
+    // Procesar la orden para limpiar la estructura
+    const processedOrder = {
+        _id: order._id,
+        orderType: order.orderType,
+        requestedProducts: order.requestedProducts,
+        itemCount: order.itemCount,
+        total: order.total,
+        createdAt: order.createdAt,
+        status: order.status,
+        companyId: order.companyId,
+        createdBy: order.createdBy
+    };
+
+    // Agregar campos específicos según el tipo de orden
+    if (order.orderType === 'table') {
+        processedOrder.tableId = order.tableId;
+        processedOrder.peopleCount = order.peopleCount;
+        processedOrder.tableInfo = order.tableInfo || null;
+    }
+
+    if (order.orderType === 'delivery') {
+        processedOrder.customerId = order.customerId;
+        processedOrder.deliveryAddress = order.deliveryAddress;
+    }
+
+    if (order.orderType === 'pickup') {
+        processedOrder.customerName = order.customerName;
+        processedOrder.customerPhone = order.customerPhone;
+    }
+
+    // Agregar información de referencias
+    processedOrder.companyInfo = order.companyInfo || null;
+    processedOrder.createdByInfo = order.createdByInfo || null;
+
+    // Agregar campos adicionales si existen
+    if (order.updatedAt) processedOrder.updatedAt = order.updatedAt;
+    if (order.closedAt) processedOrder.closedAt = order.closedAt;
+
+    return processedOrder;
+}
 
 // PATCH: Cerrar cocina - Endpoint específico para el botón "Cerrar cocina"
 router.patch('/:id/close', authenticateToken, requireRole(['admin', 'manager', 'mesero']), async (req, res) => {
