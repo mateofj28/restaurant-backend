@@ -837,6 +837,404 @@ async function getEnrichedOrder(collection, orderId) {
     return processedOrder;
 }
 
+// PATCH: Editar productos de una orden - Endpoint específico para editar cantidades y eliminar productos
+router.patch('/:id/edit-products', authenticateToken, requireRole(['admin', 'manager', 'mesero']), async (req, res) => {
+    try {
+        const collection = req.db.collection('orders');
+        const { id } = req.params;
+        const { requestedProducts, editedBy } = req.body;
+
+        if (!ObjectId.isValid(id)) {
+            return res.status(400).json({ error: 'ID de orden no válido' });
+        }
+
+        // 1. OBTENER ORDEN ACTUAL DESDE LA BASE DE DATOS
+        const currentOrder = await collection.findOne({ 
+            _id: new ObjectId(id),
+            companyId: req.user.companyId 
+        });
+
+        if (!currentOrder) {
+            return res.status(404).json({ error: 'Orden no encontrada' });
+        }
+
+        // 2. VALIDAR ESTADO DE LA ORDEN
+        if (currentOrder.status === 'closed') {
+            return res.status(400).json({ 
+                error: 'No se puede editar una orden que ya está cerrada',
+                success: false 
+            });
+        }
+
+        // 3. PREPARAR AUDITORÍA
+        const auditEntry = {
+            timestamp: new Date(),
+            editedBy: editedBy || req.user.userId,
+            userName: req.user.name || 'Usuario desconocido',
+            changes: []
+        };
+
+        // 4. DETECTAR PRODUCTOS ELIMINADOS (los que están en la orden actual pero no en la petición)
+        const requestedProductIds = requestedProducts.map(p => p.productId);
+        const productsToDelete = currentOrder.requestedProducts.filter(
+            currentProduct => !requestedProductIds.includes(currentProduct.productId)
+        );
+
+        // Validar que los productos a eliminar pueden ser eliminados
+        for (const productToDelete of productsToDelete) {
+            const nonPendingUnits = productToDelete.statusByQuantity.filter(unit => unit.status !== 'pendiente');
+            
+            if (nonPendingUnits.length > 0) {
+                errors.push(`No se puede eliminar ${productToDelete.productSnapshot.name}: tiene ${nonPendingUnits.length} unidades que no están en estado "pendiente"`);
+                hasErrors = true;
+            } else {
+                // Registrar eliminación en auditoría
+                auditEntry.changes.push({
+                    type: 'PRODUCTO_ELIMINADO',
+                    productId: productToDelete.productId,
+                    productName: productToDelete.productSnapshot.name,
+                    quantity: productToDelete.requestedQuantity,
+                    details: `Eliminado completamente (${productToDelete.requestedQuantity} unidades)`
+                });
+            }
+        }
+
+        // 5. PROCESAR CADA PRODUCTO SOLICITADO
+        const processedProducts = [];
+        const productsCollection = req.db.collection('products');
+        let totalAmount = 0;
+        let hasErrors = false;
+
+        for (const requestedProduct of requestedProducts) {
+            const { productId, requestedQuantity } = requestedProduct;
+
+            // Buscar producto actual en la orden
+            const currentProduct = currentOrder.requestedProducts.find(p => p.productId === productId);
+
+            if (!currentProduct) {
+                // PRODUCTO NUEVO - Validar que existe en la base de datos
+                const productData = await productsCollection.findOne({
+                    _id: new ObjectId(productId),
+                    companyId: new ObjectId(req.user.companyId),
+                    isActive: true
+                });
+
+                if (!productData) {
+                    errors.push(`Producto con ID ${productId} no encontrado`);
+                    hasErrors = true;
+                    continue;
+                }
+
+                // Crear snapshot del producto
+                const productSnapshot = {
+                    name: productData.name,
+                    price: productData.price,
+                    category: productData.category || '',
+                    description: productData.description || ''
+                };
+
+                // Crear statusByQuantity inicial (todos pendientes)
+                const statusByQuantity = [];
+                for (let i = 1; i <= requestedQuantity; i++) {
+                    statusByQuantity.push({
+                        index: i,
+                        status: 'pendiente'
+                    });
+                }
+
+                processedProducts.push({
+                    productId,
+                    productSnapshot,
+                    requestedQuantity: parseInt(requestedQuantity),
+                    message: requestedProduct.message || '',
+                    statusByQuantity
+                });
+
+                totalAmount += productData.price * requestedQuantity;
+
+                // Registrar cambio en auditoría
+                auditEntry.changes.push({
+                    type: 'PRODUCTO_AGREGADO',
+                    productId,
+                    productName: productData.name,
+                    quantity: requestedQuantity,
+                    details: `Agregado ${requestedQuantity} unidades`
+                });
+
+            } else {
+                // PRODUCTO EXISTENTE - Aplicar reglas de edición
+                const currentQuantity = currentProduct.requestedQuantity;
+
+                if (requestedQuantity === 0) {
+                    // ELIMINAR PRODUCTO - Validar que todas las unidades estén en "pendiente"
+                    const nonPendingUnits = currentProduct.statusByQuantity.filter(unit => unit.status !== 'pendiente');
+                    
+                    if (nonPendingUnits.length > 0) {
+                        errors.push(`No se puede eliminar ${currentProduct.productSnapshot.name}: tiene ${nonPendingUnits.length} unidades que no están en estado "pendiente"`);
+                        hasErrors = true;
+                        continue;
+                    }
+
+                    // Registrar eliminación en auditoría
+                    auditEntry.changes.push({
+                        type: 'PRODUCTO_ELIMINADO',
+                        productId,
+                        productName: currentProduct.productSnapshot.name,
+                        quantity: currentQuantity,
+                        details: `Eliminado completamente (${currentQuantity} unidades)`
+                    });
+
+                    // No agregar a processedProducts (se elimina)
+                    continue;
+
+                } else if (requestedQuantity > currentQuantity) {
+                    // AUMENTAR CANTIDAD - Siempre permitido
+                    const newUnits = requestedQuantity - currentQuantity;
+                    const newStatusByQuantity = [...currentProduct.statusByQuantity];
+
+                    // Agregar nuevas unidades como "pendiente"
+                    for (let i = currentQuantity + 1; i <= requestedQuantity; i++) {
+                        newStatusByQuantity.push({
+                            index: i,
+                            status: 'pendiente'
+                        });
+                    }
+
+                    processedProducts.push({
+                        ...currentProduct,
+                        requestedQuantity: parseInt(requestedQuantity),
+                        statusByQuantity: newStatusByQuantity
+                    });
+
+                    totalAmount += currentProduct.productSnapshot.price * requestedQuantity;
+
+                    // Registrar cambio en auditoría
+                    auditEntry.changes.push({
+                        type: 'CANTIDAD_AUMENTADA',
+                        productId,
+                        productName: currentProduct.productSnapshot.name,
+                        previousQuantity: currentQuantity,
+                        newQuantity: requestedQuantity,
+                        details: `Agregadas ${newUnits} unidades (${currentQuantity} → ${requestedQuantity})`
+                    });
+
+                } else if (requestedQuantity < currentQuantity) {
+                    // DISMINUIR CANTIDAD - Eliminar selectivamente solo unidades "pendiente"
+                    const unitsToRemove = currentQuantity - requestedQuantity;
+                    
+                    // Separar unidades por estado
+                    const pendingUnits = currentProduct.statusByQuantity.filter(unit => unit.status === 'pendiente');
+                    const nonPendingUnits = currentProduct.statusByQuantity.filter(unit => unit.status !== 'pendiente');
+                    
+                    // Verificar que hay suficientes unidades pendientes para eliminar
+                    if (pendingUnits.length < unitsToRemove) {
+                        errors.push(`No se puede reducir ${currentProduct.productSnapshot.name} a ${requestedQuantity} unidades: solo hay ${pendingUnits.length} unidades pendientes disponibles para eliminar, pero se necesitan eliminar ${unitsToRemove}`);
+                        hasErrors = true;
+                        continue;
+                    }
+                    
+                    // Mantener todas las unidades no pendientes + las pendientes que no se eliminan
+                    const pendingUnitsToKeep = pendingUnits.slice(0, pendingUnits.length - unitsToRemove);
+                    const finalStatusByQuantity = [...nonPendingUnits, ...pendingUnitsToKeep];
+                    
+                    // Reindexar las unidades manteniendo el orden lógico
+                    const reindexedStatusByQuantity = finalStatusByQuantity
+                        .sort((a, b) => a.index - b.index) // Mantener orden original
+                        .map((unit, index) => ({
+                            ...unit,
+                            index: index + 1
+                        }));
+
+                    processedProducts.push({
+                        ...currentProduct,
+                        requestedQuantity: parseInt(requestedQuantity),
+                        statusByQuantity: reindexedStatusByQuantity
+                    });
+
+                    totalAmount += currentProduct.productSnapshot.price * requestedQuantity;
+
+                    // Registrar cambio en auditoría
+                    auditEntry.changes.push({
+                        type: 'CANTIDAD_REDUCIDA',
+                        productId,
+                        productName: currentProduct.productSnapshot.name,
+                        previousQuantity: currentQuantity,
+                        newQuantity: requestedQuantity,
+                        details: `Eliminadas ${unitsToRemove} unidades pendientes (${currentQuantity} → ${requestedQuantity})`
+                    });
+
+                } else {
+                    // CANTIDAD IGUAL - Mantener sin cambios
+                    processedProducts.push(currentProduct);
+                    totalAmount += currentProduct.productSnapshot.price * requestedQuantity;
+                }
+            }
+        }
+
+        // 6. SI HAY ERRORES, RECHAZAR LA EDICIÓN
+        if (hasErrors) {
+            return res.status(400).json({
+                success: false,
+                error: 'Edición rechazada por las siguientes razones:',
+                details: errors,
+                currentOrder: await getEnrichedOrder(collection, new ObjectId(id))
+            });
+        }
+
+        // 7. CASO ESPECIAL: Si no quedan productos después de las eliminaciones, eliminar la orden completa
+        if (processedProducts.length === 0) {
+            const deleteResult = await collection.deleteOne({ _id: new ObjectId(id) });
+            
+            // Liberar mesa si era orden de mesa
+            if (currentOrder.orderType === 'table' && currentOrder.tableId) {
+                const tablesCollection = req.db.collection('tables');
+                await tablesCollection.updateOne(
+                    { _id: new ObjectId(currentOrder.tableId) },
+                    {
+                        $set: {
+                            status: TABLE_STATUS.AVAILABLE,
+                            currentOrder: null,
+                            occupiedAt: null,
+                            occupiedBy: null
+                        }
+                    }
+                );
+            }
+
+            return res.status(200).json({
+                success: true,
+                message: 'Orden eliminada completamente porque no quedan productos',
+                deleted: true,
+                orderId: id,
+                audit: auditEntry,
+                tableReleased: currentOrder.orderType === 'table'
+            });
+        }
+
+        // 8. SI NO HAY CAMBIOS, DEVOLVER ESTADO ACTUAL
+        if (auditEntry.changes.length === 0) {
+            return res.status(200).json({
+                success: true,
+                message: 'No se detectaron cambios en la orden',
+                order: await getEnrichedOrder(collection, new ObjectId(id)),
+                audit: null
+            });
+        }
+
+        // 9. APLICAR CAMBIOS A LA BASE DE DATOS
+        const updateData = {
+            requestedProducts: processedProducts,
+            itemCount: processedProducts.length,
+            total: parseFloat(totalAmount.toFixed(2)),
+            updatedAt: new Date(),
+            // Agregar entrada de auditoría
+            $push: {
+                editHistory: auditEntry
+            }
+        };
+
+        const result = await collection.findOneAndUpdate(
+            { _id: new ObjectId(id) },
+            { 
+                $set: {
+                    requestedProducts: updateData.requestedProducts,
+                    itemCount: updateData.itemCount,
+                    total: updateData.total,
+                    updatedAt: updateData.updatedAt
+                },
+                $push: updateData.$push
+            },
+            { returnDocument: 'after' }
+        );
+
+        if (!result) {
+            return res.status(404).json({ 
+                success: false,
+                error: 'Orden no encontrada durante la actualización' 
+            });
+        }
+
+        // 10. DEVOLVER RESPUESTA EXITOSA
+        const enrichedOrder = await getEnrichedOrder(collection, result._id);
+        
+        res.status(200).json({
+            success: true,
+            message: 'Orden editada exitosamente',
+            order: enrichedOrder,
+            audit: auditEntry,
+            summary: {
+                totalChanges: auditEntry.changes.length,
+                changeTypes: auditEntry.changes.map(c => c.type),
+                newTotal: updateData.total,
+                newItemCount: updateData.itemCount
+            }
+        });
+
+    } catch (error) {
+        console.error("Error editing order products:", error);
+        res.status(500).json({ 
+            success: false,
+            error: 'Error interno del servidor al editar la orden',
+            details: error.message 
+        });
+    }
+});
+
+// GET: Obtener historial de auditoría de una orden
+router.get('/:id/audit-history', authenticateToken, requireRole(['admin', 'manager', 'mesero']), async (req, res) => {
+    try {
+        const collection = req.db.collection('orders');
+        const { id } = req.params;
+
+        if (!ObjectId.isValid(id)) {
+            return res.status(400).json({ error: 'ID de orden no válido' });
+        }
+
+        const order = await collection.findOne(
+            { _id: new ObjectId(id), companyId: req.user.companyId },
+            { projection: { editHistory: 1, createdAt: 1, createdBy: 1, _id: 1 } }
+        );
+
+        if (!order) {
+            return res.status(404).json({ error: 'Orden no encontrada' });
+        }
+
+        // Obtener información del usuario que creó la orden
+        const usersCollection = req.db.collection('users');
+        const createdByUser = order.createdBy ? await usersCollection.findOne(
+            { _id: new ObjectId(order.createdBy) },
+            { projection: { name: 1, email: 1, role: 1 } }
+        ) : null;
+
+        const auditHistory = [
+            // Entrada inicial de creación
+            {
+                timestamp: order.createdAt,
+                editedBy: order.createdBy,
+                userName: createdByUser?.name || 'Usuario desconocido',
+                userEmail: createdByUser?.email || '',
+                userRole: createdByUser?.role || '',
+                changes: [{
+                    type: 'ORDEN_CREADA',
+                    details: 'Orden creada inicialmente'
+                }]
+            },
+            // Historial de ediciones
+            ...(order.editHistory || [])
+        ];
+
+        res.status(200).json({
+            orderId: id,
+            auditHistory,
+            totalEdits: (order.editHistory || []).length
+        });
+
+    } catch (error) {
+        console.error("Error fetching audit history:", error);
+        res.status(500).json({ error: 'Error al obtener el historial de auditoría' });
+    }
+});
+
 // PATCH: Cerrar cocina - Endpoint específico para el botón "Cerrar cocina"
 router.patch('/:id/close', authenticateToken, requireRole(['admin', 'manager', 'mesero']), async (req, res) => {
     try {

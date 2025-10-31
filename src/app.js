@@ -115,6 +115,8 @@ export function createApp(db) {
                 <li><strong>POST</strong> /api/orders - Crear orden</li>
                 <li><strong>GET</strong> /api/orders/:id - Obtener orden por ID</li>
                 <li><strong>PUT</strong> /api/orders/:id - Actualizar orden</li>
+                <li><strong>PATCH</strong> /api/orders/:id/edit-products - Editar productos de orden</li>
+                <li><strong>GET</strong> /api/orders/:id/audit-history - Historial de auditoría</li>
                 <li><strong>PATCH</strong> /api/orders/:id/close - Cerrar cocina</li>
             </ul>
 

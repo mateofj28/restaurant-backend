@@ -1,104 +1,75 @@
-// Script para liberar todas las mesas ocupadas en la base de datos
+// Script para liberar todas las mesas ocupadas
 import { MongoClient } from 'mongodb';
 import dotenv from 'dotenv';
 
 dotenv.config();
 
+const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/restaurant';
+
 async function liberarTodasLasMesas() {
-    const client = new MongoClient(process.env.MONGODB_URI);
+    const client = new MongoClient(MONGODB_URI);
     
     try {
         await client.connect();
-        console.log('Conectado a MongoDB');
+        const db = client.db();
         
-        const db = client.db(process.env.DB_NAME);
+        console.log('🔓 Iniciando liberación de mesas...\n');
+        
         const tablesCollection = db.collection('tables');
         
-        // Verificar estado actual de las mesas
-        console.log('🔍 Verificando estado actual de las mesas...\n');
+        // 1. Obtener todas las mesas ocupadas
+        const mesasOcupadas = await tablesCollection.find({
+            status: { $in: ['occupied', 'reserved'] }
+        }).toArray();
         
-        const allTables = await tablesCollection.find({}).toArray();
-        console.log(`📊 Total de mesas en la base de datos: ${allTables.length}`);
+        console.log(`📊 Mesas encontradas para liberar: ${mesasOcupadas.length}`);
         
-        // Mostrar estadísticas actuales
-        const estadisticas = {
-            available: allTables.filter(t => t.status === 'available').length,
-            occupied: allTables.filter(t => t.status === 'occupied').length,
-            reserved: allTables.filter(t => t.status === 'reserved').length,
-            cleaning: allTables.filter(t => t.status === 'cleaning').length,
-            out_of_service: allTables.filter(t => t.status === 'out_of_service').length
-        };
-        
-        console.log('\n📈 Estado actual de las mesas:');
-        console.log(`   🟢 Disponibles: ${estadisticas.available}`);
-        console.log(`   🔴 Ocupadas: ${estadisticas.occupied}`);
-        console.log(`   🟡 Reservadas: ${estadisticas.reserved}`);
-        console.log(`   🧹 En limpieza: ${estadisticas.cleaning}`);
-        console.log(`   ⚫ Fuera de servicio: ${estadisticas.out_of_service}`);
-        
-        // Mostrar mesas ocupadas antes de liberar
-        const mesasOcupadas = allTables.filter(t => t.status === 'occupied');
-        if (mesasOcupadas.length > 0) {
-            console.log('\n🔴 Mesas ocupadas que se van a liberar:');
-            mesasOcupadas.forEach(mesa => {
-                console.log(`   Mesa ${mesa.number} - ${mesa.location || 'Sin ubicación'}`);
-                console.log(`     Ocupada desde: ${mesa.occupiedAt || 'No registrado'}`);
-                console.log(`     Orden actual: ${mesa.currentOrder || 'No registrada'}`);
-                console.log('');
-            });
+        if (mesasOcupadas.length === 0) {
+            console.log('✅ No hay mesas ocupadas para liberar');
+            return;
         }
         
-        // Liberar todas las mesas (cambiar estado a available y limpiar campos de ocupación)
-        console.log('🔄 Liberando todas las mesas...\n');
+        // 2. Mostrar mesas que se van a liberar
+        console.log('\n📋 Mesas que se liberarán:');
+        mesasOcupadas.forEach(mesa => {
+            console.log(`   Mesa ${mesa.number} - Estado: ${mesa.status} - Orden: ${mesa.currentOrder || 'N/A'}`);
+        });
         
+        // 3. Liberar todas las mesas
         const resultado = await tablesCollection.updateMany(
-            {}, // Sin filtro = todas las mesas
+            { status: { $in: ['occupied', 'reserved'] } },
             {
                 $set: {
                     status: 'available',
                     currentOrder: null,
                     occupiedAt: null,
                     occupiedBy: null,
-                    updatedAt: new Date(),
-                    updatedBy: 'system-script-liberar'
+                    reservedAt: null,
+                    reservedBy: null,
+                    reservedFor: null
                 }
             }
         );
         
-        console.log(`✅ Operación completada exitosamente!`);
-        console.log(`   Mesas actualizadas: ${resultado.modifiedCount}`);
-        console.log(`   Mesas que coincidieron: ${resultado.matchedCount}`);
+        console.log(`\n✅ Mesas liberadas exitosamente: ${resultado.modifiedCount}`);
         
-        // Verificar estado final
-        console.log('\n🔍 Verificando estado final...');
-        const mesasFinales = await tablesCollection.find({}).toArray();
-        const disponiblesFinales = mesasFinales.filter(t => t.status === 'available').length;
+        // 4. Verificar resultado
+        const mesasLibres = await tablesCollection.countDocuments({ status: 'available' });
+        const mesasTotal = await tablesCollection.countDocuments({ isActive: true });
         
-        console.log(`📊 Estado final:`);
-        console.log(`   🟢 Todas las mesas disponibles: ${disponiblesFinales}/${mesasFinales.length}`);
+        console.log(`\n📈 Estado final:`);
+        console.log(`   Mesas disponibles: ${mesasLibres}`);
+        console.log(`   Mesas totales activas: ${mesasTotal}`);
+        console.log(`   Porcentaje libre: ${((mesasLibres / mesasTotal) * 100).toFixed(1)}%`);
         
-        if (disponiblesFinales === mesasFinales.length) {
-            console.log('\n🎉 ¡Todas las mesas han sido liberadas exitosamente!');
-        } else {
-            console.log('\n⚠️  Algunas mesas no pudieron ser liberadas. Verificar manualmente.');
-        }
-        
-        // Mostrar resumen por empresa
-        console.log('\n📋 Resumen por empresa:');
-        const empresas = [...new Set(mesasFinales.map(t => t.companyId))];
-        
-        for (const empresaId of empresas) {
-            const mesasEmpresa = mesasFinales.filter(t => t.companyId === empresaId);
-            console.log(`   Empresa ${empresaId}: ${mesasEmpresa.length} mesas liberadas`);
-        }
+        console.log('\n🎉 Proceso completado exitosamente!');
         
     } catch (error) {
-        console.error('❌ Error al liberar las mesas:', error);
+        console.error('❌ Error liberando mesas:', error);
     } finally {
         await client.close();
-        console.log('\n🔌 Conexión cerrada');
     }
 }
 
-// Ejecutar el script
+// Ejecutar script
 liberarTodasLasMesas();
